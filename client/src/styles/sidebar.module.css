@@ -1,0 +1,46 @@
+.sidebar {
+  width: 260px;
+  background: #1c2940;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 100vh;
+}
+
+.brand {
+  font-size: 2.2rem;
+  font-weight: 500;
+  padding: 24px 32px 24px 0;
+  letter-spacing: 1px;
+  margin-right: 40px;
+  line-height: 1.2;
+}
+
+.navLinks {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-left: 40px;
+}
+
+.navLinks a {
+  color: #fff;
+  text-decoration: none;
+  font-size: 1.1rem;
+  padding: 8px 0;
+  transition: background 0.2s, color 0.2s;
+  border-radius: 6px;
+  width: fit-content;
+}
+
+.navLinks a:hover, .navLinks .active {
+  background: #253356;
+  color: #b3d1ff;
+}
+
+.footer {
+  font-size: 1rem;
+  padding: 24px 0 32px 0;
+  color: #b0b8c1;
+} 
