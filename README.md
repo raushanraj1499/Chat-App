@@ -47,7 +47,7 @@ CLOUDINARY_API_SECRET=your_api_secret
 
 ### Clone the repository
 ```bash
-git clone https://github.com/udaysr17/360Link.git
+git clone https://github.com/raushanraj1499/Chat-App.git
 cd 360Link
 ```
 
