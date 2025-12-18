@@ -53,7 +53,7 @@ const Signup = () => {
     <div className={styles.container}>
       <div className={styles.loginCard}>
         <div className={styles.header}>
-          <h1 className={styles.logo}>360Link</h1>
+          <h1 className={styles.logo}>Chat-App</h1>
           <h2 className={styles.title}>Create Account</h2>
           <p className={styles.subtitle}>Sign up to get started:</p>
         </div>
@@ -81,7 +81,7 @@ const Signup = () => {
               value={email}
               onChange={(e)=> setEmail(e.target.value)}
               className={styles.input}
-              placeholder="johndoe@360link.com"
+              placeholder="johndoe@chatapp.com"
               required
               disabled={loading}
             />
@@ -138,4 +138,4 @@ const Signup = () => {
   );
 };
 
-export default Signup; 
+export default Signup;

@@ -20,7 +20,7 @@ const NoChatSelected = () => {
           </svg>
         </div>
         
-        <h3>Welcome to 360Link</h3>
+        <h3>Welcome to Chat-App</h3>
         <p>Select a conversation to start messaging</p>
         
         {/* <div className={styles.noChatActions}>

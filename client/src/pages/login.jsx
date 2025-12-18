@@ -57,7 +57,7 @@ const Login = () => {
     <div className={styles.container}>
       <div className={styles.loginCard}>
         <div className={styles.header}>
-          <h1 className={styles.logo}>360Link</h1>
+          <h1 className={styles.logo}>Chat-App</h1>
           <h2 className={styles.title}>Account Login</h2>
           <p className={styles.subtitle}>Enter your account info below:</p>
         </div>
@@ -72,7 +72,7 @@ const Login = () => {
               value={email}
               onChange={handleChange}
               className={styles.input}
-              placeholder="johndoe@360link.com"
+              placeholder="johndoe@chatapp.com"
               required
               disabled={loading}
             />

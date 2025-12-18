@@ -6,7 +6,7 @@ const Sidebar = () => {
   const location = useLocation();
   return (
     <aside className={styles.sidebar}>
-      <div className={styles.brand}>360Link</div>
+      <div className={styles.brand}>Chat-App</div>
       <nav className={styles.navLinks}>
         <Link to="/dashboard" className={location.pathname === '/dashboard' ? styles.active : ''}>Dashboard</Link>
         <Link to="/chat" className={location.pathname === '/chat' ? styles.active : ''}>Chat</Link>
