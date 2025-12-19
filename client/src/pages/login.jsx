@@ -115,7 +115,7 @@ const Login = () => {
       
       <div className={styles.bottomFooter}>
         <p className={styles.copyright}>
-          All rights reserved@ <span className={styles.poweredBy}>Uday</span>.
+          All rights reserved@ <span className={styles.poweredBy}>Raushan</span>.
         </p>
       </div>
     </div>

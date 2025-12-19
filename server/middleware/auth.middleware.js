@@ -21,6 +21,6 @@ const protect = asyncHandler(async(req, res, next)=>{
             message : 'Invalid Token'
         })
     }
-})  
+})
 
 export default protect;
