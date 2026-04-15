@@ -9,14 +9,14 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/udaysr17/360Link.git"
+    "url": "git+https://github.com/raushanraj1499/Chat-App.git"
   },
-  "author": "uday",
+  "author": "raushan",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/udaysr17/360Link/issues"
+    "url": "https://github.com/raushanraj1499/Chat-App/issues"
   },
-  "homepage": "https://github.com/udaysr17/360Link#readme",
+  "homepage": "https://github.com/raushanraj1499/Chat-App/blob/main/README.md",
   "dependencies": {
     "bcrypt": "^6.0.0",
     "cloudinary": "^2.6.1",
