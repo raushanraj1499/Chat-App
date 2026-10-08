@@ -3,7 +3,6 @@ import asyncHandler from 'express-async-handler'
 import User from '../models/user.model.js';
 
 const protect = asyncHandler(async(req, res, next)=>{
-    console.log(req.cookies);
     const token = req.cookies?.token;
     if(!token){
         return res.status(401).json({
@@ -16,7 +15,6 @@ const protect = asyncHandler(async(req, res, next)=>{
         next();
     }
     catch(err){
-        console.log(err);
         return res.status(401).json({
             message : 'Invalid Token'
         })

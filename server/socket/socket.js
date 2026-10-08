@@ -1,14 +1,19 @@
 import { Server } from "socket.io";
 import cookie from 'cookie';
+import jwt from 'jsonwebtoken';
 
 export const InitializeSocket = (server)=>{
-    const io = new Server(server, {
+    const socketOptions = process.env.NODE_ENV === 'production'
+      ? {}
+      : {
         cors : {
-            origin : "http://localhost:5173",
+            origin : process.env.CLIENT_URL || "http://localhost:5173",
             methods : ["GET", "POST"],
             credentials : true
         }
-    });
+      };
+
+    const io = new Server(server, socketOptions);
 
     io.on('connection', (socket)=>{
         const cookies = cookie.parse(socket.handshake.headers.cookie || "");
@@ -20,10 +25,19 @@ export const InitializeSocket = (server)=>{
             return;
         }
 
-        socket.on("setup", (userData) => {
-            socket.join(userData._id);
+        try {
+            const decodedToken = jwt.verify(token, process.env.JWT_SECRET_KEY);
+            socket.userId = decodedToken._id;
+        } catch {
+            socket.emit('unauthorized', {message : "Authentication failed"});
+            socket.disconnect();
+            return;
+        }
+
+        socket.on("setup", () => {
+            socket.join(socket.userId);
             socket.emit("connected");
-            console.log(`User joined personal room: ${userData._id}`);
+            console.log(`User joined personal room: ${socket.userId}`);
         });
 
         socket.on("join chat", (roomId) => {

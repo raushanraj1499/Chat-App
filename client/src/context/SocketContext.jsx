@@ -11,7 +11,7 @@
     useEffect(() => {
       if (!user) return;
 
-      const newSocket = io("http://localhost:3000", {
+      const newSocket = io({
         withCredentials: true,
         transports: ['websocket'],
       });

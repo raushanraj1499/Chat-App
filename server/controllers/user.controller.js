@@ -9,6 +9,29 @@ cloudinary.config({
     api_secret : process.env.CLOUDINARY_API_SECRET
 })
 
+const authCookieOptions = {
+    httpOnly: true,
+    sameSite: 'strict',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 24 * 60 * 60 * 1000
+};
+
+const uploadAvatar = (buffer) => new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+        { resource_type: 'image' },
+        (error, result) => {
+            if (error) {
+                reject(error);
+                return;
+            }
+
+            resolve(result);
+        }
+    );
+
+    uploadStream.end(buffer);
+});
+
 const login = asyncHandler( async(req, res)=>{
     const {email , password} = req.body;
     const user =await User.findOne({email : email})
@@ -29,11 +52,7 @@ const login = asyncHandler( async(req, res)=>{
     } )
 
     return res.status(200)
-    .cookie('token', token, {
-        httpOnly : true,
-        sameSite : 'strict',
-        maxAge : 24*60*60*1000
-    })
+    .cookie('token', token, authCookieOptions)
     .json({
         message : 'Logged in successfully',
         user: {
@@ -48,7 +67,9 @@ const login = asyncHandler( async(req, res)=>{
 const logout = asyncHandler(async(req, res)=>{
     return res.status(200)
     .clearCookie('token',{
-        httpOnly: true
+        httpOnly: true,
+        sameSite: authCookieOptions.sameSite,
+        secure: authCookieOptions.secure
     })
     .json({
         message: 'Logged out successfully'
@@ -56,19 +77,10 @@ const logout = asyncHandler(async(req, res)=>{
 })
 
 const register = asyncHandler(async(req, res)=>{
-    console.log("i'm here");
     const {username, email , password, avatar} = req.body;
-    console.log(req.body);
-    console.log(req.file);
     let url = avatar;
-    const originalPath = req.file?.path;
-    if(originalPath){
-        const uploadOnCloudinary = asyncHandler(async(originalPath)=>{
-            const image = await cloudinary.uploader.upload(originalPath);
-            return image;
-        })
-        const imageOnCloudinary = await uploadOnCloudinary(originalPath);
-        console.log(imageOnCloudinary);
+    if(req.file?.buffer){
+        const imageOnCloudinary = await uploadAvatar(req.file.buffer);
         url = imageOnCloudinary.secure_url;
     }
 
