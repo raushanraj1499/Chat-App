@@ -8,6 +8,9 @@ Chat-App is a full stack real time chat application build with React, Node.js, S
 - Avatar upload with Cloudinary
 - Real-Time Chat using Socket.io
 - Error Handling and Form validation
+- Session-aware routes with retryable loading errors
+- HTTP message history and sending while live updates reconnect
+- Conversation-specific message caches and drafts, with duplicate submission protection
 
 ## Tech Stack
 
@@ -66,4 +69,17 @@ cd client
 npm install
 npm run dev
 ```
+
+## Verification
+
+Run `npm run lint`, `npm test`, and `npm run build` from `client/`.
+Run `npm test` from `server/` for the authentication middleware checks.
+The frontend regression tests use mocked HTTP and socket connections; they do not
+require MongoDB or Cloudinary.
+
+Signed-out users are redirected to `/login`; signed-in users are redirected from
+`/login` and `/signup` to `/chat`. `/` resolves according to the current session.
+An unavailable server shows a retry action. Live updates reconnect automatically,
+and HTTP history and sends stay available during reconnection. Failed sends keep
+their draft, and logout or an expired session discards the previous session's data.
 

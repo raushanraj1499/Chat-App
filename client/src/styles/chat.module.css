@@ -511,6 +511,32 @@
   background: #fafbfc;
 }
 
+.connectionStatus, .requestStatus {
+  padding: 8px 24px;
+  font-size: 14px;
+  color: #1c2940;
+  background: #f7f8fa;
+}
+
+.connectionStatus button, .requestStatus button {
+  margin-left: 12px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.sendButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.chatSection {
+  height: 100%;
+}
+
+.mainContent {
+  min-height: 0;
+}
+
 .mainContent {
   flex: 1;
   background: #fafbfc;

@@ -3,18 +3,13 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import { AuthProvider } from './context/AuthContext.jsx';
-import { SocketProvider } from './context/SocketContext.jsx';
-import { ConversationProvider } from './context/ConversationContext.jsx';
+import SessionProviders from './context/SessionProviders.jsx';
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
     <AuthProvider>
-      <SocketProvider>
-        <ConversationProvider>
-          <App />
-        </ConversationProvider>
-      </SocketProvider>
+      <SessionProviders><App /></SessionProviders>
     </AuthProvider>
   </React.StrictMode>
 );

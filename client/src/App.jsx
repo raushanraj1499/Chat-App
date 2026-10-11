@@ -1,19 +1,25 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import Login from './pages/login.jsx';
 import Chat from './pages/chat.jsx';
 import Signup from './pages/signup.jsx';
 import NotFound from './pages/notFound.jsx';
 import './App.css';
+import SessionRoute from './components/SessionRoute.jsx';
 
 
 function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/login" element = {<Login/>}/>
-        <Route path="/chat" element={<Chat/>}/>
-        <Route path="/signup" element={<Signup/>}/>
+        <Route path="/" element={<SessionRoute home />} />
+        <Route element={<SessionRoute guestOnly />}>
+          <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Signup />} />
+        </Route>
+        <Route element={<SessionRoute />}>
+          <Route path="/chat" element={<Chat />} />
+        </Route>
         <Route path="*" element={<NotFound/>} />
       </Routes>
       

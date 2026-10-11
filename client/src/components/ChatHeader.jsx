@@ -1,11 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import styles from '../styles/chat.module.css';
 import { useAuth } from '../context/AuthContext.jsx';
-import { useConversation } from '../context/ConversationContext.jsx';
-import axios from 'axios';
+import api, { isCanceled, errorMessage } from '../lib/api.js';
 import toast from 'react-hot-toast';
 import useDebounce from '../hooks/useDebounce.js';
-import { useNavigate } from 'react-router-dom';
 
 const ChatHeader = ({ 
   searchTerm, 
@@ -15,19 +13,18 @@ const ChatHeader = ({
   showSearchResults, 
   setShowSearchResults,
   startConversation ,
-  profileOpen,
   setProfileOpen
 }) => {
-  const { user , setUser} = useAuth();
-  const {setSelectedConversation, setMessages} = useConversation();
+  const { user, logout } = useAuth();
+  const [loggingOut, setLoggingOut] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const debouncedSearchTerm = useDebounce(searchTerm, 1000);
   const searchRef = useRef(null);
   const dropdownRef = useRef(null);
-  const navigate = useNavigate();
 
   // Handle search for users
   useEffect(() => {
+    const controller = new AbortController();
     const fetchUsers = async () => {
       if (!debouncedSearchTerm.trim()) {
         setSearchResults([]);
@@ -35,19 +32,20 @@ const ChatHeader = ({
       }
   
       try {
-        const config = {
-          headers: { Authorization: `Bearer ${user.token}` }
-        };
-        const { data } = await axios.get(`/api/user/search?q=${debouncedSearchTerm}`, config);
+        const { data } = await api.get('/api/user/search', {
+          params: { q: debouncedSearchTerm }, signal: controller.signal,
+        });
+        if (controller.signal.aborted) return;
         setSearchResults(data.users);
         setShowSearchResults(true);
       } catch (error) {
-        toast.error("Failed to search user");
+        if (!controller.signal.aborted && !isCanceled(error)) toast.error(errorMessage(error, 'Failed to search user'));
       }
     };
 
     fetchUsers();
-  }, [debouncedSearchTerm, user.token, setSearchResults, setShowSearchResults]);
+    return () => controller.abort();
+  }, [debouncedSearchTerm, setSearchResults, setShowSearchResults]);
 
   // Close search results when clicking outside
   useEffect(() => {
@@ -62,16 +60,14 @@ const ChatHeader = ({
   }, [setShowSearchResults]);
 
   const handleLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
     try {
-      await axios.post('/api/user/logout');
-      setUser(null);
-      setSelectedConversation(null);
-      setMessages([]);
-
-      navigate('/login');
+      await logout();
     } catch (error) {
-      toast.error("Something went wrong");
-      return;
+      toast.error(errorMessage(error, 'Unable to log out. Please try again.'));
+    } finally {
+      setLoggingOut(false);
     }
     setDropdownOpen(false);
   };
@@ -153,8 +149,9 @@ const ChatHeader = ({
             <button 
               className={styles.dropdownItem}
               onClick={handleLogout}
+              disabled={loggingOut}
             >
-              Logout
+              {loggingOut ? 'Logging out…' : 'Logout'}
             </button>
           </div>
         )}

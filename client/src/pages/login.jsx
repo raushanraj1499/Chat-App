@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import React, { useState, useRef } from 'react';
+import api, { errorMessage } from '../lib/api.js';
 import styles from '../styles/login.module.css'
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
@@ -11,11 +11,7 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const {setUser} = useAuth();
-
-  useEffect(() => {
-    setEmail('');
-    setPassword('');
-  }, []);
+  const submitting = useRef(false);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -24,12 +20,13 @@ const Login = () => {
   };
 
   const submitHandler = async () => {
-    setLoading(true);
+    if (submitting.current) return;
     if (!email || !password) {
         toast.error("Fill all the credentials")
-        setLoading(false);
         return;
     }
+    submitting.current = true;
+    setLoading(true);
 
     try {
       const config = {
@@ -37,13 +34,14 @@ const Login = () => {
           "Content-type": "application/json",
         },
       };
-      const { data } = await axios.post("/api/user/login",{ email, password },config);
+      const { data } = await api.post("/api/user/login",{ email, password }, { ...config, skipAuthExpiry: true });
       setUser(data.user);
-      setLoading(false);
       // toast.success(data.message);
-      navigate('/chat');
+      navigate('/chat', { replace: true });
     } catch (error) {
-      toast.error(error.response?.data?.message);
+      toast.error(errorMessage(error, 'Unable to log in. Please try again.'));
+    } finally {
+      submitting.current = false;
       setLoading(false);
     }
   };

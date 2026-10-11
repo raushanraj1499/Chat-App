@@ -6,7 +6,10 @@ const ChatList = ({
   conversations, 
   selectedConversation, 
   setSelectedConversation, 
-  setGroupModalOpen 
+  setGroupModalOpen,
+  loading,
+  error,
+  onRetry
 }) => {
   return (
     <aside className={styles.rightPanel}>
@@ -27,6 +30,12 @@ const ChatList = ({
       </div>
       
       <div className={styles.chatList}>
+        {loading && <p className={styles.requestStatus} role="status">Loading conversations…</p>}
+        {error && (
+          <div className={styles.requestStatus} role="alert">
+            {error}<button onClick={onRetry}>Retry conversations</button>
+          </div>
+        )}
         {conversations && conversations.length > 0 ? (
           conversations.map((conversation) => (
             <ChatItem
@@ -36,14 +45,14 @@ const ChatList = ({
               setSelectedConversation={setSelectedConversation}
             />
           ))
-        ) : (
+        ) : !loading && !error ? (
           <div className={styles.emptyChatList}>
             <svg viewBox="0 0 24 24" fill="currentColor">
               <path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"/>
             </svg>
             <p>No conversations yet</p>
           </div>
-        )}
+        ) : null}
       </div>
     </aside>
   );

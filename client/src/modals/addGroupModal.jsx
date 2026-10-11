@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import useDebounce from '../hooks/useDebounce.js';
-import axios from 'axios';
+import api, { isCanceled, errorMessage } from '../lib/api.js';
+import toast from 'react-hot-toast';
 import { useConversation } from '../context/ConversationContext.jsx';
 
 const AddGroupModal = ({ open, onClose }) => {
@@ -11,7 +12,14 @@ const AddGroupModal = ({ open, onClose }) => {
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
 
-  const {conversations, setConversations} = useConversation();
+  const {setConversations} = useConversation();
+  const submitting = useRef(false);
+  const mounted = useRef(false);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   // Reset form when modal opens/closes
   useEffect(() => {
@@ -26,29 +34,38 @@ const AddGroupModal = ({ open, onClose }) => {
   const debouncedSearch = useDebounce(search, 1000);
   
   useEffect(() => {
+    const controller = new AbortController();
     const searchUsers = async () => {
-      if (debouncedSearch.trim().length < 2) {
+      if (!open || debouncedSearch.trim().length < 2) {
         setSearchResults([]);
+        setLoading(false);
         return;
       }
   
       setLoading(true);
       try {
-        const response = await axios.get(`/api/user/search?q=${encodeURIComponent(debouncedSearch.trim())}`);
+        const response = await api.get('/api/user/search', {
+          params: { q: debouncedSearch.trim() }, signal: controller.signal,
+        });
+        if (controller.signal.aborted) return;
         setSearchResults(response.data.users || []);
       } catch (error) {
-        console.error('Error searching users:', error);
-        setSearchResults([]);
+        if (!controller.signal.aborted && !isCanceled(error)) {
+          toast.error(errorMessage(error, 'Failed to search users.'));
+          setSearchResults([]);
+        }
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     };
 
     searchUsers();
-  }, [debouncedSearch]);
+    return () => controller.abort();
+  }, [debouncedSearch, open]);
 
   // Toggle user selection
   const toggleUserSelection = (user) => {
+    if (submitting.current) return;
     setSelectedUsers(prev => {
       const isSelected = prev.find(u => u._id === user._id);
       if (isSelected) {
@@ -60,29 +77,31 @@ const AddGroupModal = ({ open, onClose }) => {
   };
 
   const handleCreateGroup = async () => {
+    if (submitting.current) return;
     if (!groupName.trim()) {
-      alert('Please enter a group name');
+      toast.error('Please enter a group name');
       return;
     }
     if (selectedUsers.length === 0) {
-      alert('Please select at least one user');
+      toast.error('Please select at least one user');
       return;
     }
   
+    submitting.current = true;
     setCreating(true);
     try {
       const participantIds = selectedUsers.map(user => user._id);
       
-      const response = await axios.post('/api/conversation/group', {
+      const response = await api.post('/api/conversation/group', {
         conversationName: groupName.trim(),
         participants: participantIds
       });
   
-      console.log('Group created:', response.data);
+      if (!mounted.current) return;
    
       const newGroup = response.data.conversation;
    
-      setConversations(prev => [newGroup, ...prev]);
+      setConversations(prev => [newGroup, ...prev.filter(group => group._id !== newGroup._id)]);
       
       // Reset form and close modal
       setGroupName('');
@@ -92,10 +111,10 @@ const AddGroupModal = ({ open, onClose }) => {
       onClose();
       
     } catch (error) {
-      console.error('Error creating group:', error);
-      alert(error.response?.data?.message || 'Failed to create group');
+      if (mounted.current) toast.error(errorMessage(error, 'Failed to create group'));
     } finally {
-      setCreating(false);
+      submitting.current = false;
+      if (mounted.current) setCreating(false);
     }
   };
 
@@ -113,7 +132,7 @@ const AddGroupModal = ({ open, onClose }) => {
   return (
     <div style={modalStyle}>
       <div style={cardStyle}>
-        <button style={closeStyle} onClick={onClose} aria-label="Close">&times;</button>
+        <button style={closeStyle} onClick={onClose} aria-label="Close" disabled={creating}>&times;</button>
         <h1 style={{ fontSize: '2.5rem', fontWeight: 400, marginBottom: 18, textAlign: 'left' }}>Create Group Chat</h1>
         
         <input
@@ -121,6 +140,7 @@ const AddGroupModal = ({ open, onClose }) => {
           type="text"
           placeholder="Chat Name"
           value={groupName}
+          disabled={creating}
           onChange={e => setGroupName(e.target.value)}
         />
         
@@ -129,6 +149,7 @@ const AddGroupModal = ({ open, onClose }) => {
           type="text"
           placeholder="Search users by username..."
           value={search}
+          disabled={creating}
           onChange={e => setSearch(e.target.value)}
         />
 

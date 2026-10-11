@@ -1,27 +1,27 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import styles from '../styles/login.module.css';
-import toast , {Toaster} from 'react-hot-toast'
-import axios from 'axios'
+import toast from 'react-hot-toast'
+import api, { errorMessage } from '../lib/api.js';
 import { useNavigate } from 'react-router-dom';
 
 const Signup = () => {
-  const [username, setUsername]= useState();
-  const [email, setEmail] = useState();
-  const [password, setPassword] = useState();
+  const [username, setUsername]= useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [avatar, setAvatar] = useState();
-  const [loading, setLoading] = useState();
+  const [loading, setLoading] = useState(false);
+  const submitting = useRef(false);
   const navigate = useNavigate();
   
   const submitHandler = async(e)=>{
     e.preventDefault();
-    setLoading(true);
-    console.log("i'm submitting....")
+    if (submitting.current) return;
     if(!username || !email || !password){
       toast.error('Please fill all the Fields');
-      setLoading(false);
       return;
     }
-    console.log(username, email , password, avatar);
+    submitting.current = true;
+    setLoading(true);
     try{
       const formData = new FormData();
       formData.append('username', username);
@@ -31,20 +31,18 @@ const Signup = () => {
         formData.append('avatar', avatar);
       }
 
-      const config = {
-        headers: {
-          "Content-Type": "multipart/form-data"
-        }
-      };
-      const response = await axios.post("api/user/signup", formData, config);
-      console.log(response);
-      setLoading(false);
+      const response = await api.post("/api/user/signup", formData, { skipAuthExpiry: true });
+      if (response.data.success === false) {
+        toast.error(response.data.message || 'Unable to sign up.');
+        return;
+      }
       toast.success(response.data.message);
       navigate('/login')
     }
     catch (error) {
-      const message = error.response?.data?.message;
-      toast.error(message);
+      toast.error(errorMessage(error, 'Unable to sign up. Please try again.'));
+    } finally {
+      submitting.current = false;
       setLoading(false);
     }
   }

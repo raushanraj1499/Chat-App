@@ -15,8 +15,6 @@ const MessageList = ({ messages, selectedConversation, setShowGroupMembers }) =>
     return null;
   }
 
-  console.log("selected conversation", selectedConversation);
-
   return (
     <>
       <div className={styles.chatHeader}>

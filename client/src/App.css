@@ -45,3 +45,13 @@
 .read-the-docs {
   color: #888;
 }
+
+.sessionError {
+  padding: 48px 24px;
+  color: #1c2940;
+}
+
+.sessionError button {
+  padding: 10px 24px;
+  cursor: pointer;
+}
