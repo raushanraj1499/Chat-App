@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const api = axios.create({ withCredentials: true, timeout: 15000 });
+const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || undefined, withCredentials: true, timeout: 15000 });
 let sessionVersion = 0;
 const expiryListeners = new Set();
 

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import styles from '../styles/chat.module.css';
 import Sidebar from "../components/Sidebar.jsx";
 import ChatHeader from "../components/ChatHeader.jsx";
@@ -8,7 +8,6 @@ import NoChatSelected from "../components/NoChatSelected.jsx";
 import ProfileModal from "../modals/profileModal.jsx";
 import AddGroupModal from "../modals/addGroupModal.jsx";
 import api, { isCanceled, errorMessage } from "../lib/api.js";
-import { conversationIdOf } from "../lib/messages.js";
 import toast from 'react-hot-toast';
 import { useAuth } from "../context/AuthContext.jsx";
 import { useConversation } from "../context/ConversationContext.jsx";
@@ -17,9 +16,9 @@ import GroupMembersListModal from "../modals/GroupMembersListModal.jsx";
 
 const Chat = () => {
   const { user } = useAuth();
-  const { socket, connectionStatus, retryConnection } = useSocket();
-  const { selectedConversation, setSelectedConversation, conversations, setConversations,
-    messages, addMessages } = useConversation();
+  const { socket, connectionStatus, connectionVersion, retryConnection } = useSocket();
+  const { selectedConversation, setSelectedConversation, conversations,
+    messages, addMessages, captureVersions, reconcileConversations, removeConversation, upsertConversation, applyMessage } = useConversation();
   const conversationId = selectedConversation?._id;
   const [drafts, setDrafts] = useState({});
   const [pendingSends, setPendingSends] = useState({});
@@ -42,46 +41,13 @@ const Chat = () => {
     return () => { mounted.current = false; };
   }, []);
 
-  const updatePreview = useCallback((message) => {
-    const id = conversationIdOf(message);
-    setConversations(previous => previous.map(conversation => {
-      if (conversation._id !== id) return conversation;
-      const latest = conversation.latestMessage;
-      if (latest && new Date(latest.createdAt) > new Date(message.createdAt)) return conversation;
-      return { ...conversation, latestMessage: message, updatedAt: message.createdAt };
-    }));
-  }, [setConversations]);
-
-  useEffect(() => {
-    if (!socket) return;
-    const handleNewMessage = (message) => {
-      const id = conversationIdOf(message);
-      if (!id || !message?._id) return;
-      addMessages(id, [message]);
-      updatePreview(message);
-    };
-    socket.on("new message", handleNewMessage);
-    return () => socket.off("new message", handleNewMessage);
-  }, [socket, addMessages, updatePreview]);
-
   useEffect(() => {
     const controller = new AbortController();
+    const snapshot = captureVersions();
     setConversationState({ loading: true, error: null });
     api.get('/api/conversation', { signal: controller.signal }).then(({ data }) => {
       if (controller.signal.aborted) return;
-      // Preserve previews and newly created chats that arrived during this request.
-      setConversations(previous => {
-        const fetched = new Map(data.conversations.map(conversation => [conversation._id, conversation]));
-        previous.forEach(conversation => {
-          const remote = fetched.get(conversation._id);
-          if (!remote) fetched.set(conversation._id, conversation);
-          else if (conversation.latestMessage &&
-            (!remote.latestMessage || new Date(conversation.latestMessage.createdAt) > new Date(remote.latestMessage.createdAt))) {
-            fetched.set(conversation._id, { ...remote, latestMessage: conversation.latestMessage });
-          }
-        });
-        return [...fetched.values()];
-      });
+      reconcileConversations(data.conversations, snapshot);
       setConversationState({ loading: false, error: null });
     }).catch(error => {
       if (!controller.signal.aborted && !isCanceled(error)) {
@@ -89,9 +55,9 @@ const Chat = () => {
       }
     });
     return () => controller.abort();
-  }, [setConversations, conversationRetry]);
+  }, [captureVersions, reconcileConversations, conversationRetry, connectionVersion]);
 
-  // Only the conversation ID triggers history loading. Preview updates do not.
+  // Refresh on selection, retry and reconnection; preview changes do not refetch.
   useEffect(() => {
     if (!conversationId) return;
     const controller = new AbortController();
@@ -102,18 +68,22 @@ const Chat = () => {
       setHistoryState(previous => ({ ...previous, [conversationId]: { loading: false, error: null } }));
     }).catch(error => {
       if (!controller.signal.aborted && !isCanceled(error)) {
+        if ([403, 404].includes(error.response?.status)) removeConversation(conversationId);
         setHistoryState(previous => ({ ...previous, [conversationId]: {
           loading: false, error: errorMessage(error, 'Unable to load messages.'),
         } }));
       }
     });
     return () => controller.abort();
-  }, [conversationId, historyRetry, addMessages]);
+  }, [conversationId, historyRetry, connectionVersion, addMessages, removeConversation]);
 
   // Joining a room is independent of HTTP history and repeats after reconnect.
   useEffect(() => {
     if (socket?.connected && conversationId) socket.emit("join chat", conversationId);
-  }, [socket, connectionStatus, conversationId]);
+    return () => {
+      if (socket?.connected && conversationId) socket.emit('leave chat', conversationId);
+    };
+  }, [socket, connectionStatus, connectionVersion, conversationId]);
 
   const startConversation = async (selectedUser) => {
     if (startingConversation.current) return;
@@ -125,7 +95,7 @@ const Chat = () => {
       try {
         const { data } = await api.post('/api/conversation', { participants: [selectedUser._id] });
         if (!mounted.current) return;
-        setConversations(previous => [data.conversation, ...previous.filter(item => item._id !== data.conversation._id)]);
+        upsertConversation(data.conversation);
         setSelectedConversation(data.conversation);
       } catch (error) {
         if (mounted.current) toast.error(errorMessage(error, 'Unable to start a conversation.'));
@@ -150,12 +120,10 @@ const Chat = () => {
       const { data } = await api.post('/api/message/' + conversationId, { content });
       if (!mounted.current) return;
       const message = data.data;
-      addMessages(conversationId, [message]);
-      updatePreview(message);
+      applyMessage(message);
       // Do not discard text the user wrote while this request was pending.
       setDrafts(previous => previous[conversationId] === content
         ? { ...previous, [conversationId]: '' } : previous);
-      if (socket?.connected) socket.emit("new message", message);
     } catch (error) {
       if (mounted.current) toast.error(errorMessage(error, 'Unable to send message. Please try again.'));
     } finally {

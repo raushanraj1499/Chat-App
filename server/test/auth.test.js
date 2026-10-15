@@ -6,6 +6,8 @@ import protect from '../middleware/auth.middleware.js';
 
 const originalFindById = User.findById;
 const originalSecret = process.env.JWT_SECRET_KEY;
+const userId = '507f1f77bcf86cd799439011';
+const tokenFor = () => jwt.sign({ _id: userId }, process.env.JWT_SECRET_KEY, { expiresIn: '1h' });
 beforeEach(() => { process.env.JWT_SECRET_KEY = 'test-session-secret'; });
 afterEach(() => {
   User.findById = originalFindById;
@@ -37,7 +39,7 @@ test('missing, invalid, and expired cookies return authentication failure', asyn
 
 test('a deleted user returns 401 instead of reaching the controller with a null user', async () => {
   User.findById = () => ({ select: async () => null });
-  const result = await authenticate(jwt.sign({ _id: 'alice' }, process.env.JWT_SECRET_KEY));
+  const result = await authenticate(tokenFor());
   assert.equal(result.res.statusCode, 401);
   assert.equal(result.nextCalled, false);
 });
@@ -45,15 +47,15 @@ test('a deleted user returns 401 instead of reaching the controller with a null 
 test('database outages propagate as server failures rather than authentication failures', async () => {
   const outage = new Error('Database unavailable');
   User.findById = () => ({ select: async () => { throw outage; } });
-  const result = await authenticate(jwt.sign({ _id: 'alice' }, process.env.JWT_SECRET_KEY));
+  const result = await authenticate(tokenFor());
   assert.equal(result.error, outage);
   assert.equal(result.res.statusCode, undefined);
 });
 
 test('an authenticated request gets the current user', async () => {
-  const user = { _id: 'alice', username: 'Alice' };
+  const user = { _id: userId, username: 'Alice' };
   User.findById = () => ({ select: async () => user });
-  const result = await authenticate(jwt.sign({ _id: 'alice' }, process.env.JWT_SECRET_KEY));
+  const result = await authenticate(tokenFor());
   assert.equal(result.req.user, user);
   assert.equal(result.nextCalled, true);
   assert.equal(result.error, undefined);

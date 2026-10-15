@@ -2,6 +2,9 @@ import User from "../models/user.model.js"
 import asyncHandler from "express-async-handler"
 import jwt from 'jsonwebtoken';
 import { v2 as cloudinary } from "cloudinary";
+import { runtimeConfig } from '../config/runtime.js';
+import { textValue } from '../utils/validation.js';
+import { personalRoom } from '../socket/socket.js';
 
 cloudinary.config({
     cloud_name : process.env.CLOUDINARY_CLOUD_NAME,
@@ -9,12 +12,7 @@ cloudinary.config({
     api_secret : process.env.CLOUDINARY_API_SECRET
 })
 
-const authCookieOptions = {
-    httpOnly: true,
-    sameSite: 'strict',
-    secure: process.env.NODE_ENV === 'production',
-    maxAge: 24 * 60 * 60 * 1000
-};
+const authCookieOptions = () => ({ ...runtimeConfig().cookie, maxAge: 24 * 60 * 60 * 1000 });
 
 const uploadAvatar = (buffer) => new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
@@ -33,17 +31,19 @@ const uploadAvatar = (buffer) => new Promise((resolve, reject) => {
 });
 
 const login = asyncHandler( async(req, res)=>{
-    const {email , password} = req.body;
+    const email = textValue(req.body?.email, 'email', 254);
+    const password = req.body?.password;
+    textValue(password, 'password', 72);
     const user =await User.findOne({email : email})
     if(!user){
         return res.status(400).json({
-            message : "User does not exist"
+            success: false, message: "Invalid email or password"
         })
     }
     const isMatch = await user.isPasswordCorrect(password);
     if(!isMatch){
         return res.status(400).json({
-            message : "Password is incorrect"
+            success: false, message: "Invalid email or password"
         })
     }
     const SECRET = process.env.JWT_SECRET_KEY;
@@ -52,7 +52,7 @@ const login = asyncHandler( async(req, res)=>{
     } )
 
     return res.status(200)
-    .cookie('token', token, authCookieOptions)
+    .cookie('token', token, authCookieOptions())
     .json({
         message : 'Logged in successfully',
         user: {
@@ -65,25 +65,34 @@ const login = asyncHandler( async(req, res)=>{
 })
 
 const logout = asyncHandler(async(req, res)=>{
+    const io = req.app.get('io');
+    if (io && req.cookies?.token) {
+        try {
+            const claims = jwt.verify(req.cookies.token, process.env.JWT_SECRET_KEY, { algorithms: ['HS256'] });
+            const sockets = await io.in(personalRoom(claims._id)).fetchSockets();
+            for (const socket of sockets) if (socket.sessionToken === req.cookies.token) {
+                socket.emit('unauthorized', { message: 'Logged out' });
+                socket.disconnect(true);
+            }
+        } catch { /* Clearing an invalid or expired cookie still succeeds. */ }
+    }
     return res.status(200)
-    .clearCookie('token',{
-        httpOnly: true,
-        sameSite: authCookieOptions.sameSite,
-        secure: authCookieOptions.secure
-    })
+    .clearCookie('token', runtimeConfig().cookie)
     .json({
         message: 'Logged out successfully'
     })
 })
 
 const register = asyncHandler(async(req, res)=>{
-    const {username, email , password, avatar} = req.body;
-    let url = avatar;
-    if(req.file?.buffer){
-        const imageOnCloudinary = await uploadAvatar(req.file.buffer);
-        url = imageOnCloudinary.secure_url;
+    const username = textValue(req.body?.username, 'username', 100);
+    const email = textValue(req.body?.email, 'email', 254);
+    const password = req.body?.password;
+    textValue(password, 'password', 72);
+    const avatar = req.body?.avatar;
+    if (avatar !== undefined && typeof avatar !== 'string') {
+        return res.status(400).json({ success: false, message: 'avatar must be a string' });
     }
-
+    let url = avatar;
     const userExists =await User.findOne({email:email});
     if(userExists){
         return res.status(400).json({
@@ -92,11 +101,9 @@ const register = asyncHandler(async(req, res)=>{
         })
     }
 
-    if(!username || !email || !password){
-        return res.status(200).json({
-            message : "Give all credentials",
-            success : false
-        })
+    if(req.file?.buffer){
+        const imageOnCloudinary = await uploadAvatar(req.file.buffer);
+        url = imageOnCloudinary.secure_url;
     }
 
     // new + save or create
@@ -120,19 +127,14 @@ const register = asyncHandler(async(req, res)=>{
 })
 
 const searchUser = asyncHandler(async(req,res)=>{
-    const username = req.query.q;
-    if(!username){
-        return res.status(400).json({
-            message : "Empty username doesn't exist"
-        })
-    }
+    const username = textValue(req.query.q, 'q', 100);
     const users = await User.find({
         username
     }).select('-password');
     
     if(users.length == 0){
         return res.status(400).json({
-            message : "No user found"
+            success: false, message: "No user found"
         })
     }
     return res.status(200).json({
@@ -141,9 +143,7 @@ const searchUser = asyncHandler(async(req,res)=>{
 })
 
 const getUserInfo = asyncHandler(async(req,res)=>{
-    const user = req.user._id;
-
-    const userInfo = await User.findById(user).select("-password");
+    const userInfo = req.user;
     return res.status(200).json({
         username : userInfo.username,
         _id : userInfo._id,

@@ -1,161 +1,53 @@
-import Message from "../models/message.model.js";
-import User from "../models/user.model.js";
-import Conversation from "../models/conversation.model.js";
-import expressAsyncHandler from "express-async-handler";
+import Message from '../models/message.model.js';
+import Conversation from '../models/conversation.model.js';
+import asyncHandler from 'express-async-handler';
+import { ApiError } from '../utils/ApiError.js';
+import { objectId, textValue } from '../utils/validation.js';
+import { idOf, requireConversation, withConversationLock } from '../utils/conversations.js';
+import { publishConversation } from '../utils/live-updates.js';
 
-// create, read, update , delete
-const createMessage = expressAsyncHandler(async(req, res) => {
-    console.log('this is create message route');
-    const { content } = req.body;
-    const sender = req.user._id;
-    const conversationId = req.params.conversationId;
-
-    if (!content || content.trim().length === 0) {
-        return res.status(400).json({
-            message: "Message content cannot be empty"
-        });
-    }
-
-    const conversation = await Conversation.findById(conversationId);
-    if (!conversation) {
-        return res.status(404).json({
-            message: "Conversation not found"
-        });
-    }
-
-    if (!conversation.participants.includes(sender)) {
-        return res.status(403).json({
-            message: "User not authorized to send messages in this conversation"
-        });
-    }
-
-    const newMessage = await Message.create({
-        content: content.trim(),
-        sender,
-        conversation: conversationId
-    });
-
-    const populatedMessage = await Message.findById(newMessage._id)
-        .populate('sender', '-password');
-
-    await Conversation.findByIdAndUpdate(conversationId, {
-        latestMessage: newMessage._id,
-        updatedAt: new Date()
-    });
-
-    return res.status(201).json({
-        message: "Message created successfully",
-        data: populatedMessage  
+export const createMessage = asyncHandler(async (req, res) => {
+    const id = objectId(req.params.conversationId, 'conversation ID');
+    const content = textValue(req.body?.content, 'content');
+    await withConversationLock(id, async () => {
+        await requireConversation(id, req.user._id);
+        const message = await Message.create({ content, sender: req.user._id, conversation: id });
+        await Conversation.findByIdAndUpdate(id, { latestMessage: message._id });
+        await message.populate('sender', '-password');
+        await publishConversation(req.app.get('io'), id, { event: 'new message', message });
+        res.status(201).json({ message: 'Message created successfully', data: message });
     });
 });
 
-const getMessage = expressAsyncHandler(async(req, res) => {
-    const conversationId = req.params.conversationId;
-    const userId = req.user._id;
-
-    const conversation = await Conversation.findById(conversationId);
-    if (!conversation) {
-        return res.status(404).json({
-            message: "Conversation not found"
-        });
-    }
-
-    if (!conversation.participants.includes(userId)) {
-        return res.status(403).json({
-            message: "User not authorized to view messages"
-        });
-    }
-
-    const messages = await Message.find({ conversation: conversationId })
-        .sort({ createdAt: 1 })
-        .populate("sender", "-password");
-
-    return res.status(200).json({
-        message: "Messages fetched successfully",
-        messages
-    });
+export const getMessage = asyncHandler(async (req, res) => {
+    const id = objectId(req.params.conversationId, 'conversation ID');
+    await requireConversation(id, req.user._id);
+    const messages = await Message.find({ conversation: id }).sort({ createdAt: 1, _id: 1 }).populate('sender', '-password');
+    res.json({ message: 'Messages fetched successfully', messages });
 });
 
-const editMessage = expressAsyncHandler(async(req, res) => {
-    const { messageId, content } = req.body;
-    const userId = req.user._id;
-
-    if (!content || content.trim().length === 0) {
-        return res.status(400).json({
-            message: "Message content cannot be empty"
-        });
-    }
-
-    const message = await Message.findById(messageId);
-    if (!message) {
-        return res.status(404).json({
-            message: "Message not found"
-        });
-    }
-
-    if (message.sender.toString() !== userId.toString()) {
-        return res.status(403).json({
-            message: "You can only edit your own messages"
-        });
-    }
-
-    const updatedMessage = await Message.findByIdAndUpdate(
-        messageId,
-        {
-            content: content.trim(),
-            updatedAt: new Date(),
-            isEdited: true
-        },
-        { new: true }
-    ).populate('sender', '-password');
-
-    return res.status(200).json({
-        message: "Message updated successfully",
-        data: updatedMessage
+async function mutateMessage(req, res, deleting) {
+    const id = objectId(req.params.conversationId, 'conversation ID');
+    const messageId = objectId(req.params.messageId, 'message ID');
+    const content = deleting ? null : textValue(req.body?.content, 'content');
+    await withConversationLock(id, async () => {
+        await requireConversation(id, req.user._id);
+        const message = await Message.findOne({ _id: messageId, conversation: id });
+        if (!message) throw new ApiError(404, 'Message not found');
+        if (idOf(message.sender) !== idOf(req.user)) throw new ApiError(403, 'You can only change your own messages');
+        if (message.deletedAt && !deleting) throw new ApiError(400, 'Deleted messages cannot be edited');
+        if (deleting) {
+            message.content = '';
+            message.deletedAt ||= new Date();
+        } else {
+            message.content = content;
+            message.isEdited = true;
+        }
+        await message.save();
+        await message.populate('sender', '-password');
+        await publishConversation(req.app.get('io'), id, { event: deleting ? 'message deleted' : 'message updated', message });
+        res.json({ message: deleting ? 'Message deleted successfully' : 'Message updated successfully', data: message });
     });
-});
-
-const deleteMessage = expressAsyncHandler(async(req, res) => {
-    const { messageId } = req.body;
-    const userId = req.user._id;
-
-    const message = await Message.findById(messageId);
-    if (!message) {
-        return res.status(404).json({
-            message: "Message not found"
-        });
-    }
-
-    if (message.sender.toString() !== userId.toString()) {
-        return res.status(403).json({
-            message: "You can only delete your own messages"
-        });
-    }
-
-    const conversationId = message.conversation;
-
-    await Message.findByIdAndDelete(messageId);
-
-    const conversation = await Conversation.findById(conversationId);
-    if (conversation.latestMessage && conversation.latestMessage.toString() === messageId) {
-        const newLatestMessage = await Message.findOne({ 
-            conversation: conversationId 
-        }).sort({ createdAt: -1 });
-
-        await Conversation.findByIdAndUpdate(conversationId, {
-            latestMessage: newLatestMessage ? newLatestMessage._id : null,
-            updatedAt: new Date()
-        });
-    }
-
-    return res.status(200).json({
-        message: "Message deleted successfully"
-    });
-});
-
-export {
-    createMessage,
-    getMessage,
-    editMessage,
-    deleteMessage
-};
+}
+export const editMessage = asyncHandler((req, res) => mutateMessage(req, res, false));
+export const deleteMessage = asyncHandler((req, res) => mutateMessage(req, res, true));

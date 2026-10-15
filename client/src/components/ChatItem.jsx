@@ -23,7 +23,7 @@ const ChatItem = ({ conversation, selectedConversation, setSelectedConversation 
     if (!conversation.latestMessage) return '';
     
     const isOwnMessage = conversation.latestMessage.sender?._id === user._id;
-    const messageText = conversation.latestMessage.content || '';
+    const messageText = conversation.latestMessage.deletedAt ? 'Message deleted' : conversation.latestMessage.content || '';
     
     if (isOwnMessage) {
       return `You: ${messageText}`;

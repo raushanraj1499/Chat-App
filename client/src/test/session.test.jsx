@@ -216,7 +216,7 @@ describe('conversation state', () => {
     expect(screen.getByLabelText('Message').value).toBe('Bob draft');
   });
 
-  it('deduplicates socket and HTTP messages and does not reload history when previews change', async () => {
+  it('deduplicates messages, avoids preview-triggered history loads, and refreshes on reconnect', async () => {
     const history = deferred();
     api.defaults.adapter = vi.fn(config => config.url === '/api/message/ab'
       ? history.promise.then(messages => reply(config, { messages })) : authAdapter(config));
@@ -230,9 +230,16 @@ describe('conversation state', () => {
     await screen.findByText('Earlier history');
     expect(screen.getAllByText('Shared message').length).toBe(2); // One bubble and one preview.
     expect(api.defaults.adapter.mock.calls.filter(([config]) => config.url === '/api/message/ab').length).toBe(1);
+    api.defaults.adapter.mockImplementation(config => config.url === '/api/message/ab'
+      ? Promise.resolve(reply(config, { messages: [live] }))
+      : config.url === '/api/conversation'
+        ? Promise.resolve(reply(config, { conversations: [{ ...chats[0], latestMessage: live }, chats[1]] }))
+        : authAdapter(config));
     act(() => socket.trigger('connect'));
     expect(socket.emit).toHaveBeenCalledWith('join chat', 'ab');
-    expect(api.defaults.adapter.mock.calls.filter(([config]) => config.url === '/api/message/ab').length).toBe(1);
+    await waitFor(() => expect(api.defaults.adapter.mock.calls.filter(([config]) => config.url === '/api/message/ab').length).toBe(2));
+    expect(socket.emit).not.toHaveBeenCalledWith('setup');
+    expect(screen.getAllByText('Shared message').length).toBe(2);
   });
 
   it('sends over HTTP while disconnected, blocks duplicates, and preserves a failed draft', async () => {
@@ -293,4 +300,106 @@ describe('conversation state', () => {
     expect(await screen.findByText('Recovered')).toBeTruthy();
     expect(screen.queryByText('Loading messages…')).toBeNull();
   });
+});
+
+describe('server-owned live updates', () => {
+  it('adds unopened conversations from summaries and applies edits and deletions', async () => {
+    mountApp();
+    await screen.findByText('Bob');
+    const socket = sockets.at(-1);
+    const dave = { _id: 'dave', username: 'Dave' };
+    const incoming = { ...message('new', 'ad', 'Unopened'), sender: dave, updatedAt: '2026-10-10T00:00:00Z' };
+    const summary = { _id: 'ad', participants: [alice, dave], isGroup: false, latestMessage: incoming };
+    act(() => socket.trigger('new message', { ...incoming, conversationSummary: summary }));
+    expect(await screen.findByText('Dave')).toBeTruthy();
+    fireEvent.click(screen.getByText('Dave'));
+    expect(screen.getAllByText('Unopened').length).toBe(2);
+    const edit = { ...incoming, content: 'Changed', isEdited: true, updatedAt: '2026-10-10T00:01:00Z' };
+    act(() => socket.trigger('message updated', { ...edit, conversationSummary: { ...summary, latestMessage: edit } }));
+    expect(screen.getAllByText('Changed').length).toBe(2);
+    const deletion = { ...edit, content: '', deletedAt: '2026-10-10T00:02:00Z', updatedAt: '2026-10-10T00:02:00Z' };
+    act(() => socket.trigger('message deleted', { ...deletion, conversationSummary: { ...summary, latestMessage: deletion } }));
+    expect(screen.getAllByText('Message deleted').length).toBe(2);
+    expect(screen.queryByText('Changed')).toBeNull();
+  });
+
+  it('refetches on every connection and recovers missed messages without duplicates', async () => {
+    const original = message('old', 'ab', 'Original');
+    const missed = message('missed', 'ab', 'Missed while offline');
+    let history = [original];
+    api.defaults.adapter = vi.fn(config => config.url === '/api/message/ab'
+      ? Promise.resolve(reply(config, { messages: history })) : authAdapter(config));
+    mountApp();
+    fireEvent.click(await screen.findByText('Bob'));
+    await screen.findByText('Original');
+    const socket = sockets.at(-1);
+    act(() => socket.trigger('connect'));
+    await waitFor(() => expect(api.defaults.adapter.mock.calls.filter(([config]) => config.url === '/api/message/ab').length).toBe(2));
+    act(() => socket.trigger('disconnect', 'transport close'));
+    history = [original, missed];
+    act(() => socket.trigger('connect'));
+    await screen.findByText('Missed while offline');
+    expect(screen.getAllByText('Original').length).toBe(1);
+    expect(api.defaults.adapter.mock.calls.filter(([config]) => config.url === '/api/message/ab').length).toBe(3);
+  });
+
+  it('removes inaccessible chats, selection and caches after missed membership events', async () => {
+    mountApp();
+    fireEvent.click(await screen.findByText('Bob'));
+    api.defaults.adapter = config => config.url === '/api/conversation'
+      ? Promise.resolve(reply(config, { conversations: [chats[1]] })) : authAdapter(config);
+    act(() => sockets.at(-1).trigger('connect'));
+    await waitFor(() => expect(screen.queryByText('Bob')).toBeNull());
+    expect(screen.queryByLabelText('Message')).toBeNull();
+  });
+
+  it('keeps removals and edits that arrive while stale HTTP requests are pending', async () => {
+    const initialHistory = deferred();
+    api.defaults.adapter = config => config.url === '/api/message/ab'
+      ? initialHistory.promise.then(messages => reply(config, { messages })) : authAdapter(config);
+    mountApp();
+    fireEvent.click(await screen.findByText('Bob'));
+    const socket = sockets.at(-1);
+    const old = message('edit', 'ab', 'Old content');
+    const edited = { ...old, content: 'Current content', updatedAt: '2026-10-10T01:00:00Z' };
+    act(() => socket.trigger('message updated', edited));
+    await act(async () => initialHistory.resolve([old]));
+    expect(screen.queryByText('Old content')).toBeNull();
+    expect(screen.getAllByText('Current content').length).toBe(2);
+    const stale = deferred();
+    api.defaults.adapter = config => config.url === '/api/conversation'
+      ? stale.promise.then(conversations => reply(config, { conversations })) : authAdapter(config);
+    act(() => socket.trigger('connect'));
+    act(() => socket.trigger('conversation removed', { conversationId: 'ab' }));
+    await act(async () => stale.resolve(chats));
+    expect(screen.queryByText('Bob')).toBeNull();
+    expect(screen.queryByText('Current content')).toBeNull();
+    expect(screen.queryByLabelText('Message')).toBeNull();
+  });
+
+  it('accepts socket middleware authentication failures as session expiry', async () => {
+    mountApp();
+    await screen.findByText('My Chats');
+    act(() => sockets.at(-1).trigger('connect_error', { data: { code: 'UNAUTHORIZED' } }));
+    expect(await screen.findByRole('heading', { name: 'Account Login' })).toBeTruthy();
+  });
+});
+
+it('does not let a delayed send response undo an edit delivered through the socket', async () => {
+  const send = deferred();
+  api.defaults.adapter = config => config.method === 'post'
+    ? send.promise.then(data => reply(config, { data })) : authAdapter(config);
+  mountApp();
+  fireEvent.click(await screen.findByText('Bob'));
+  const input = screen.getByLabelText('Message');
+  fireEvent.change(input, { target: { value: 'Original send' } });
+  fireEvent.submit(input.closest('form'));
+  const original = { ...message('sent-edit', 'ab', 'Original send'), sender: alice };
+  const edited = { ...original, content: 'Edited in another tab', isEdited: true, updatedAt: '2026-10-10T01:00:00Z' };
+  act(() => sockets.at(-1).trigger('message updated', edited));
+  await act(async () => send.resolve(original));
+  expect(screen.queryByText('Original send')).toBeNull();
+  expect(screen.getByText('Edited in another tab')).toBeTruthy();
+  expect(screen.getByText('You: Edited in another tab')).toBeTruthy();
+  expect(sockets.at(-1).emit).not.toHaveBeenCalledWith('new message', expect.anything());
 });

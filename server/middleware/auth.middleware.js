@@ -1,29 +1,14 @@
-import jwt from 'jsonwebtoken'
-import asyncHandler from 'express-async-handler'
-import User from '../models/user.model.js';
+import asyncHandler from 'express-async-handler';
+import { authenticateToken } from '../utils/session.js';
 
-const protect = asyncHandler(async(req, res, next)=>{
-    const token = req.cookies?.token;
-    if(!token){
-        return res.status(401).json({
-            message : "Access token is missing"
-        })
-    }
-    let decodedToken;
+const protect = asyncHandler(async (req, res, next) => {
     try {
-        decodedToken = jwt.verify(token , process.env.JWT_SECRET_KEY);
+        const { user } = await authenticateToken(req.cookies?.token);
+        req.user = user;
+        next();
+    } catch (error) {
+        if (error.statusCode === 401) return res.status(401).json({ success: false, message: error.message });
+        throw error;
     }
-    catch {
-        return res.status(401).json({
-            message : 'Invalid Token'
-        })
-    }
-    // Database failures must not masquerade as expired authentication.
-    req.user = await User.findById(decodedToken._id).select('-password');
-    if (!req.user) {
-        return res.status(401).json({ message: 'User no longer exists' });
-    }
-    next();
-})
-
+});
 export default protect;

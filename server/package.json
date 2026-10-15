@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "dev": "nodemon server.js",
-    "start": "node server.js",
+    "start": "node --env-file-if-exists=.env server.js",
+    "start:prod": "node --env-file-if-exists=.env start-production.js",
     "test": "node --test"
   },
   "type": "module",
@@ -34,5 +35,9 @@
     "multer": "^2.0.1",
     "nodemon": "^3.1.10",
     "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "mongodb-memory-server": "^10.4.3",
+    "socket.io-client": "^4.8.4"
   }
 }

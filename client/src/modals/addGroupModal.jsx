@@ -12,7 +12,7 @@ const AddGroupModal = ({ open, onClose }) => {
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
 
-  const {setConversations} = useConversation();
+  const {upsertConversation} = useConversation();
   const submitting = useRef(false);
   const mounted = useRef(false);
 
@@ -101,7 +101,7 @@ const AddGroupModal = ({ open, onClose }) => {
    
       const newGroup = response.data.conversation;
    
-      setConversations(prev => [newGroup, ...prev.filter(group => group._id !== newGroup._id)]);
+      upsertConversation(newGroup);
       
       // Reset form and close modal
       setGroupName('');

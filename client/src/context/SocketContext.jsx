@@ -7,12 +7,14 @@ const SocketContext = createContext(null);
 export const SocketProvider = ({ children }) => {
   const [socket, setSocket] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
+  const [connectionVersion, setConnectionVersion] = useState(0);
   const { user, clearSession } = useAuth();
   const userId = user?._id;
 
   useEffect(() => {
     if (!userId) return;
-    const nextSocket = io({
+    let retryTimer;
+    const nextSocket = io(import.meta.env.VITE_SOCKET_URL || undefined, {
       withCredentials: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
@@ -22,20 +24,30 @@ export const SocketProvider = ({ children }) => {
     setSocket(nextSocket);
     setConnectionStatus('connecting');
     nextSocket.on('connect', () => {
+      clearTimeout(retryTimer);
       setConnectionStatus('connected');
-      nextSocket.emit('setup');
+      setConnectionVersion(previous => previous + 1);
     });
     nextSocket.on('unauthorized', () => {
       nextSocket.disconnect();
       clearSession();
     });
-    nextSocket.on('connect_error', () => setConnectionStatus('reconnecting'));
+    nextSocket.on('connect_error', (error) => {
+      if (error.data?.code === 'UNAUTHORIZED') {
+        nextSocket.disconnect();
+        clearSession();
+      } else {
+        setConnectionStatus('reconnecting');
+        if (!nextSocket.active) retryTimer = setTimeout(() => nextSocket.connect(), 3000);
+      }
+    });
     nextSocket.on('disconnect', (reason) => {
       setConnectionStatus('reconnecting');
       if (reason === 'io server disconnect') nextSocket.connect();
     });
     nextSocket.io.on('reconnect_attempt', () => setConnectionStatus('reconnecting'));
     return () => {
+      clearTimeout(retryTimer);
       nextSocket.removeAllListeners();
       nextSocket.io.removeAllListeners();
       nextSocket.disconnect();
@@ -44,7 +56,7 @@ export const SocketProvider = ({ children }) => {
 
   const retryConnection = useCallback(() => socket?.connect(), [socket]);
   return (
-    <SocketContext.Provider value={{ socket, connectionStatus, retryConnection }}>
+    <SocketContext.Provider value={{ socket, connectionStatus, connectionVersion, retryConnection }}>
       {children}
     </SocketContext.Provider>
   );

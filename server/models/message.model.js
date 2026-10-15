@@ -1,11 +1,11 @@
 import mongoose from "mongoose";
-import User from "./user.model.js";
-import Conversation from "./conversation.model.js";
 
 const messageSchema = new mongoose.Schema({
+    isEdited: { type: Boolean, default: false },
+    deletedAt: { type: Date, default: null },
     content : {
         type : String,
-        required : true
+        required: function () { return !this.deletedAt; }
     },
     sender : {
         type : mongoose.Schema.Types.ObjectId,

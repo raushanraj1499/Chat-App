@@ -1,6 +1,6 @@
 import express from 'express'
 import protect from '../middleware/auth.middleware.js';
-import { createGroupChat, createPersonalChat, getConversation, getParticipants, updateConversation } from '../controllers/conversation.controller.js';
+import { createGroupChat, createPersonalChat, getConversation, getParticipants, updateConversation, deleteConversation } from '../controllers/conversation.controller.js';
 
 const router = express.Router();
 
@@ -9,5 +9,6 @@ router.post('/group', protect , createGroupChat);
 router.post('/', protect, createPersonalChat);
 router.get('/:id', protect, getParticipants);
 router.put('/:id', protect, updateConversation);
+router.delete('/:id', protect, deleteConversation);
 
 export default router;

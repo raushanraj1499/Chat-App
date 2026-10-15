@@ -36,7 +36,7 @@ const MessageList = ({ messages, selectedConversation, setShowGroupMembers }) =>
           <div key={msg._id} className={`${styles.message} ${msg.sender._id === user?._id ? styles.ownMessage : styles.otherMessage}`}>
             <div className={styles.messageContent}>
               <div className={styles.messageBubble}>
-                <p>{msg.content}</p>
+                <p>{msg.deletedAt ? 'Message deleted' : msg.content}</p>
                 <span className={styles.messageTime}>
                   {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </span>
