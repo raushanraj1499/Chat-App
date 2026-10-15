@@ -17,7 +17,11 @@ try {
     });
     server.listen(config.port, () => console.log(`Server is listening on port ${config.port}`));
 } catch (error) {
-    // Do not print driver errors or connection strings containing credentials.
-    console.error(error.message.startsWith('Missing required configuration:') ? error.message : 'Startup failed. Check configuration and database availability.');
+    // Configuration and wrapped database messages are safe to print; raw driver
+    // errors can contain connection details and remain hidden.
+    const safeMessage = /^(Missing required configuration:|Invalid |Production origins |SameSite=None |MongoDB connection failed\.)/.test(error.message)
+        ? error.message
+        : 'Startup failed. Check configuration and database availability.';
+    console.error(safeMessage);
     process.exit(1);
 }

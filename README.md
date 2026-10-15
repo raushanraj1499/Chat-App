@@ -126,6 +126,8 @@ configuration is missing or MongoDB cannot connect. Failures return JSON with
 `{ success: false, message }`; internal errors do not expose credentials.
 
 The default deployment serves the built client, API, and sockets on one app origin.
+On Render, `RENDER_EXTERNAL_URL` supplies that origin automatically. Set
+`APP_ORIGIN` only to override it with a custom domain.
 For development, run both existing dev commands and use Vite's API/socket proxy.
 The allowed frontend origin defaults to `http://localhost:5173` in development;
 set `CLIENT_ORIGIN` if Vite uses a different origin or port.

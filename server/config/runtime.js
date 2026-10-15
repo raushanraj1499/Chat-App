@@ -10,7 +10,10 @@ export function runtimeConfig(env = process.env) {
     const production = env.NODE_ENV === 'production';
     const port = Number(env.PORT || 3000);
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid PORT');
-    const appOrigin = originOf(env.APP_ORIGIN || `http://localhost:${port}`, 'APP_ORIGIN');
+    // Render supplies the public HTTPS service URL at runtime. Explicit
+    // APP_ORIGIN still takes precedence for custom domains and other hosts.
+    const appOrigin = originOf(env.APP_ORIGIN || env.RENDER_EXTERNAL_URL ||
+        `http://localhost:${port}`, 'APP_ORIGIN');
     const clientOrigin = originOf(env.CLIENT_ORIGIN || env.CLIENT_URL ||
         (production ? appOrigin : 'http://localhost:5173'), 'CLIENT_ORIGIN');
     const sameSite = env.COOKIE_SAME_SITE || 'lax';

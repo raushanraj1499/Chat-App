@@ -16,6 +16,10 @@ test('configuration defaults to one origin; production cookies and clearing use 
     assert.equal(production.clientOrigin, production.appOrigin);
     assert.equal(production.cookie.secure, true);
     assert.equal(production.cookie.sameSite, 'lax');
+    const render = runtimeConfig({ NODE_ENV: 'production',
+        RENDER_EXTERNAL_URL: 'https://chat-app.onrender.com' });
+    assert.equal(render.appOrigin, 'https://chat-app.onrender.com');
+    assert.equal(render.clientOrigin, render.appOrigin);
     assert.equal(runtimeConfig({ NODE_ENV: 'production', APP_ORIGIN: 'https://api.example.com',
         CLIENT_ORIGIN: 'https://other.example.org', COOKIE_SAME_SITE: 'none' }).cookie.sameSite, 'none');
     assert.throws(() => runtimeConfig({ NODE_ENV: 'production' }));
@@ -41,7 +45,7 @@ test('unreachable MongoDB aborts startup rather than serving an unusable app', (
         env: { ...process.env, ...valid, MONGODB_URI: 'mongodb://127.0.0.1:1/test', DOTENV_CONFIG_PATH: 'missing-test-env' },
     });
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /Startup failed/);
+    assert.match(result.stderr, /MongoDB connection failed/);
     assert.doesNotMatch(result.stdout, /listening/);
 });
 
