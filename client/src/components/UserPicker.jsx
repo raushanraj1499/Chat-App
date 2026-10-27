@@ -9,9 +9,9 @@ export default function UserPicker({ excludedIds, selected, onChange, disabled }
   useEffect(() => {
     const controller = new AbortController();
     setResults([]);
-    setState({ loading: search.trim().length >= 2 });
+    setState({ loading: search.trim().length > 0 });
     const timer = setTimeout(async () => {
-      if (search.trim().length < 2) return;
+      if (!search.trim()) return;
       try {
         const { data } = await api.get('/api/user/search', { params: { q: search.trim() }, signal: controller.signal });
         if (!controller.signal.aborted) { setResults(data.users || []); setState({}); }
@@ -23,12 +23,12 @@ export default function UserPicker({ excludedIds, selected, onChange, disabled }
   }, [search]);
   const available = results.filter(user => !excludedIds.includes(user._id) && !selected.some(item => item._id === user._id));
   return <div className={styles.userPicker}>
-    <label>Find members<input value={search} onChange={event => setSearch(event.target.value)} disabled={disabled} placeholder="Search by username" /></label>
+    <label>Find members<input value={search} onChange={event => setSearch(event.target.value)} disabled={disabled} placeholder="Enter the full username" /></label>
     <div className={styles.selectedUsers}>{selected.map(user => <button type="button" key={user._id} disabled={disabled}
       onClick={() => onChange(selected.filter(item => item._id !== user._id))} aria-label={`Deselect ${user.username}`}>{user.username} ×</button>)}</div>
     {state.loading && <p role="status">Searching…</p>}
     {state.error && <p role="alert">{state.error}</p>}
-    {!state.loading && !state.error && search.trim().length >= 2 && !available.length && <p>No matching users available.</p>}
+    {!state.loading && !state.error && search.trim().length > 0 && !available.length && <p>No matching users available.</p>}
     <div className={styles.pickerResults}>{available.map(user => <button type="button" key={user._id} disabled={disabled}
       onClick={() => onChange([...selected, user])}>Add {user.username}</button>)}</div>
   </div>;

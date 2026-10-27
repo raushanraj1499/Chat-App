@@ -128,15 +128,11 @@ const register = asyncHandler(async(req, res)=>{
 
 const searchUser = asyncHandler(async(req,res)=>{
     const username = textValue(req.query.q, 'q', 100);
+    const escapedUsername = username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const users = await User.find({
-        username
-    }).select('-password');
-    
-    if(users.length == 0){
-        return res.status(400).json({
-            success: false, message: "No user found"
-        })
-    }
+        _id: { $ne: req.user._id },
+        username: { $regex: `^${escapedUsername}$`, $options: 'i' },
+    }).select('-password').sort({ username: 1, _id: 1 }).limit(20);
     return res.status(200).json({
         users
     })
