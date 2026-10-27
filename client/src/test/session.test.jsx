@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import App from '../App.jsx';
 import { AuthProvider, useAuth } from '../context/AuthContext.jsx';
 import SessionProviders from '../context/SessionProviders.jsx';
@@ -13,15 +13,15 @@ vi.mock('socket.io-client', () => ({
     const listeners = new Map();
     const socket = {
       connected: false,
-      on: vi.fn((event, listener) => listeners.set(event, listener)),
-      off: vi.fn((event) => listeners.delete(event)),
+      on: vi.fn((event, listener) => { if (!listeners.has(event)) listeners.set(event, new Set()); listeners.get(event).add(listener); }),
+      off: vi.fn((event, listener) => listeners.get(event)?.delete(listener)),
       emit: vi.fn(), connect: vi.fn(), disconnect: vi.fn(),
       removeAllListeners: vi.fn(() => listeners.clear()),
       io: { on: vi.fn(), removeAllListeners: vi.fn() },
       trigger(event, data) {
         if (event === 'connect') this.connected = true;
         if (event === 'disconnect') this.connected = false;
-        listeners.get(event)?.(data);
+        listeners.get(event)?.forEach(listener => listener(data));
       },
     };
     sockets.push(socket);
@@ -212,7 +212,7 @@ describe('conversation state', () => {
     await screen.findByText('Carol history');
     await act(async () => oldHistory.resolve([message('b', 'ab', 'Stale Bob history')]));
     expect(screen.queryByText('Stale Bob history')).toBeNull();
-    fireEvent.click(screen.getByText('Bob'));
+    fireEvent.click(screen.getByRole('button', { name: 'Bob' }));
     expect(screen.getByLabelText('Message').value).toBe('Bob draft');
   });
 
@@ -402,4 +402,193 @@ it('does not let a delayed send response undo an edit delivered through the sock
   expect(screen.getByText('Edited in another tab')).toBeTruthy();
   expect(screen.getByText('You: Edited in another tab')).toBeTruthy();
   expect(sockets.at(-1).emit).not.toHaveBeenCalledWith('new message', expect.anything());
+});
+
+describe('complete group and message behavior', () => {
+  const team = { _id: 'team', conversationName: 'Team', isGroup: true, participants: [alice, bob], groupAdmin: 'alice', revision: 1 };
+  const seedTeam = (current = team) => {
+    api.defaults.adapter = config => config.url === '/api/conversation'
+      ? Promise.resolve(reply(config, { conversations: [current] })) : authAdapter(config);
+  };
+
+  it('opens group controls only for groups, labels You/admin, confirms removal and preserves visible failures', async () => {
+    seedTeam(); mountApp();
+    fireEvent.click(await screen.findByText('Team'));
+    fireEvent.click(screen.getByRole('button', { name: /Manage group/ }));
+    const dialog = screen.getByRole('dialog', { name: 'Manage group' });
+    expect(within(dialog).getByText('Alice (You) · Admin')).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
+    expect(within(dialog).getByText('Remove Bob from this group?')).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeTruthy();
+    api.defaults.adapter = config => failure(config, 403, 'Permission changed');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }));
+    expect(await within(dialog).findByText('Permission changed')).toBeTruthy();
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('lets non-admin members rename/add/leave and hides admin controls; direct chats have no group controls', async () => {
+    seedTeam({ ...team, groupAdmin: bob }); mountApp();
+    fireEvent.click(await screen.findByText('Team'));
+    fireEvent.click(screen.getByRole('button', { name: /Manage group/ }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByRole('button', { name: 'Rename group' })).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: 'Leave group' })).toBeTruthy();
+    expect(within(dialog).queryByRole('button', { name: 'Delete group' })).toBeNull();
+    expect(within(dialog).queryByRole('button', { name: 'Remove' })).toBeNull();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close dialog' }));
+    act(() => sockets.at(-1).trigger('conversation updated', { conversation: chats[0] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Bob' }));
+    expect(screen.queryByRole('button', { name: /Manage group/ })).toBeNull();
+  });
+
+  it('excludes self/existing members from search selection and submits selected new members', async () => {
+    seedTeam(); mountApp();
+    fireEvent.click(await screen.findByText('Team'));
+    fireEvent.click(screen.getByRole('button', { name: /Manage group/ }));
+    const requests = [];
+    api.defaults.adapter = config => {
+      requests.push(config);
+      return Promise.resolve(reply(config, config.method === 'put'
+        ? { conversation: { ...team, participants: [alice, bob, carol], revision: 2 } }
+        : { users: [alice, bob, carol] }));
+    };
+    fireEvent.change(screen.getByLabelText('Find members'), { target: { value: 'ca' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Add Carol' }));
+    expect(screen.queryByRole('button', { name: 'Add Alice' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add Bob' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Add selected members' }));
+    await screen.findByText('Members (3)');
+    const update = requests.find(config => config.method === 'put');
+    expect(JSON.parse(update.data)).toEqual({ operation: 'addMembers', data: { participants: ['carol'] } });
+  });
+
+  it('edits and deletes only own messages with confirmation and an Edited label', async () => {
+    const own = { ...message('mine', 'ab', 'Original'), sender: alice };
+    const other = message('theirs', 'ab', 'Other message');
+    api.defaults.adapter = config => config.url === '/api/message/ab'
+      ? Promise.resolve(reply(config, { messages: [own, other] })) : authAdapter(config);
+    mountApp(); fireEvent.click(await screen.findByText('Bob'));
+    await screen.findByText('Original');
+    expect(screen.getAllByRole('button', { name: 'Edit' })).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByLabelText('Message content'), { target: { value: 'Updated text' } });
+    api.defaults.adapter = config => Promise.resolve(reply(config, { data: { ...own, content: 'Updated text', isEdited: true, updatedAt: '2026-10-11T00:00:00Z' } }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await within(screen.getByRole('log')).findByText('Updated text')).toBeTruthy();
+    expect(screen.getByText(/Edited ·/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    api.defaults.adapter = config => Promise.resolve(reply(config, { data: { ...own, content: '', deletedAt: '2026-10-12T00:00:00Z', updatedAt: '2026-10-12T00:00:00Z' } }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm deletion' }));
+    expect(await within(screen.getByRole('log')).findByText('Message deleted')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+  });
+
+  it('prepends history while retaining scroll position and does not jump for incoming messages when scrolled up', async () => {
+    const recent = message('recent', 'ab', 'Recent');
+    const older = { ...message('older', 'ab', 'Older'), createdAt: '2026-10-09T00:00:00Z' };
+    api.defaults.adapter = config => config.url === '/api/message/ab'
+      ? Promise.resolve(reply(config, { messages: config.params?.before ? [older] : [recent], nextCursor: config.params?.before ? null : 'recent' })) : authAdapter(config);
+    mountApp(); fireEvent.click(await screen.findByText('Bob'));
+    await screen.findByText('Recent');
+    const log = screen.getByRole('log');
+    Object.defineProperty(log, 'scrollHeight', { configurable: true, get: () => log.textContent.includes('Older') ? 2000 : 1000 });
+    Object.defineProperty(log, 'clientHeight', { configurable: true, value: 200 });
+    log.scrollTop = 100; fireEvent.scroll(log);
+    fireEvent.click(screen.getByRole('button', { name: 'Load older messages' }));
+    await screen.findByText('Older');
+    expect(log.scrollTop).toBe(1100);
+    expect(screen.queryByRole('button', { name: 'Load older messages' })).toBeNull();
+    act(() => sockets.at(-1).trigger('new message', { ...message('incoming', 'ab', 'Incoming'), createdAt: '2026-10-11T00:00:00Z' }));
+    expect(log.scrollTop).toBe(1100);
+  });
+
+  it('throttles composing, stops on blur/switch, names current typers and expires stale indicators', async () => {
+    mountApp(); fireEvent.click(await screen.findByText('Bob'));
+    const socket = sockets.at(-1);
+    act(() => socket.trigger('connect'));
+    await waitFor(() => expect(socket.emit).toHaveBeenCalledWith('join chat', 'ab'));
+    const input = screen.getByLabelText('Message');
+    fireEvent.change(input, { target: { value: 'a' } });
+    fireEvent.change(input, { target: { value: 'ab' } });
+    expect(socket.emit.mock.calls.filter(([name]) => name === 'typing')).toHaveLength(1);
+    fireEvent.blur(input);
+    expect(socket.emit).toHaveBeenCalledWith('stop typing', 'ab');
+    vi.useFakeTimers();
+    act(() => socket.trigger('typing', { conversationId: 'ab', userId: 'bob' }));
+    expect(screen.getByText('Bob is typing…')).toBeTruthy();
+    act(() => vi.advanceTimersByTime(4600));
+    expect(screen.queryByText('Bob is typing…')).toBeNull();
+    fireEvent.change(input, { target: { value: 'abc' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Carol' }));
+    expect(socket.emit.mock.calls.filter(([name]) => name === 'stop typing')).toHaveLength(2);
+    vi.useRealTimers();
+  });
+
+  it('marks the last displayed ID read only in a visible focused tab', async () => {
+    const focus = vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    const visible = message('displayed', 'ab', 'Displayed');
+    const requests = [];
+    api.defaults.adapter = config => {
+      requests.push(config);
+      if (config.url.endsWith('/read')) return Promise.resolve(reply(config, { conversation: { ...chats[0], unreadCount: 0 } }));
+      if (config.url === '/api/message/ab') return Promise.resolve(reply(config, { messages: [visible] }));
+      return authAdapter(config);
+    };
+    mountApp(); fireEvent.click(await screen.findByText('Bob'));
+    await screen.findByText('Displayed');
+    expect(requests.filter(config => config.url.endsWith('/read'))).toHaveLength(0);
+    focus.mockReturnValue(true); visibility.mockReturnValue('hidden');
+    act(() => window.dispatchEvent(new Event('focus')));
+    expect(requests.filter(config => config.url.endsWith('/read'))).toHaveLength(0);
+    visibility.mockReturnValue('visible');
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    await waitFor(() => expect(requests.filter(config => config.url.endsWith('/read'))).toHaveLength(1));
+    expect(JSON.parse(requests.find(config => config.url.endsWith('/read')).data)).toEqual({ messageId: 'displayed' });
+  });
+
+  it('purges history on a missed rejoin and rejects stale conversation summaries', async () => {
+    seedTeam(); mountApp();
+    fireEvent.click(await screen.findByText('Team'));
+    const socket = sockets.at(-1);
+    act(() => socket.trigger('new message', message('old-team', 'team', 'Previous membership')));
+    expect(within(screen.getByRole('log')).getByText('Previous membership')).toBeTruthy();
+    const rejoined = { ...team, joinedAt: '2026-10-11T00:00:00Z', revision: 5, latestMessage: null };
+    act(() => socket.trigger('conversation updated', { conversation: rejoined }));
+    expect(screen.queryByText('Previous membership')).toBeNull();
+    act(() => socket.trigger('conversation updated', { conversation: { ...team, revision: 2 } }));
+    act(() => socket.trigger('new message', message('old-team', 'team', 'Previous membership')));
+    expect(within(screen.getByRole('log')).queryByText('Previous membership')).toBeNull();
+  });
+
+  it('keeps a group removed when an earlier rename response arrives late', async () => {
+    seedTeam(); mountApp();
+    fireEvent.click(await screen.findByText('Team'));
+    fireEvent.click(screen.getByRole('button', { name: /Manage group/ }));
+    const pending = deferred();
+    api.defaults.adapter = config => pending.promise.then(conversation => reply(config, { conversation }));
+    fireEvent.change(screen.getByLabelText('Group name'), { target: { value: 'Renamed' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Rename group' }));
+    act(() => sockets.at(-1).trigger('conversation removed', { conversationId: 'team' }));
+    await act(async () => pending.resolve({ ...team, conversationName: 'Renamed', revision: 2 }));
+    expect(screen.queryByText('Renamed')).toBeNull();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('restarts pagination after reconnect so more than 50 missed messages can be recovered', async () => {
+    const old = { ...message('old-page', 'ab', 'Old cached page'), createdAt: '2026-10-01T00:00:00Z' };
+    const latest = { ...message('new-page', 'ab', 'Newest page'), createdAt: '2026-10-12T00:00:00Z' };
+    api.defaults.adapter = config => config.url === '/api/message/ab'
+      ? Promise.resolve(reply(config, { messages: [old], nextCursor: null })) : authAdapter(config);
+    mountApp(); fireEvent.click(await screen.findByText('Bob'));
+    await screen.findByText('Old cached page');
+    api.defaults.adapter = config => config.url === '/api/message/ab'
+      ? Promise.resolve(reply(config, { messages: config.params?.before ? [old] : [latest], nextCursor: config.params?.before ? null : 'new-page' })) : authAdapter(config);
+    act(() => sockets.at(-1).trigger('connect'));
+    await screen.findByText('Newest page');
+    expect(within(screen.getByRole('log')).queryByText('Old cached page')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Load older messages' }));
+    await screen.findByText('Old cached page');
+  });
 });
