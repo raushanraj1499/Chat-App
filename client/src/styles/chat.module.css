@@ -393,38 +393,31 @@ button:focus-visible, [role="button"]:focus-visible { outline: 2px solid #2584e6
   background: #fff;
 }
 
-.newGroupRow {
-  display: flex;
+.newGroupButton {
+  display: inline-flex;
   justify-content: flex-start;
   align-items: center;
   margin-top: 16px;
   font-size: 16px;
-  color: #222;
   gap: 8px;
-}
-
-.addButton {
-  width: 24px;
-  height: 24px;
+  padding: 8px 12px;
   background: none;
-  border: none;
+  border: 1px solid #e5e7eb;
   color: #1c2940;
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 4px;
+  border-radius: 8px;
   transition: all 0.2s ease;
 }
 
-.addButton:hover {
+.newGroupButton:hover {
   background: #f7f8fa;
   color: #4b2a8d;
 }
 
-.addButton svg {
+.newGroupButton svg {
   width: 18px;
   height: 18px;
+  flex-shrink: 0;
 }
 
 .chatList {

@@ -15,18 +15,16 @@ const ChatList = ({
     <aside className={styles.rightPanel}>
       <div className={styles.rightHeader}>
         <h2 className={styles.sectionTitle}>My Chats</h2>
-        <div className={styles.newGroupRow}>
+        <button
+          type="button"
+          className={styles.newGroupButton}
+          onClick={() => setGroupModalOpen(true)}
+        >
           <span>New Group Chat</span>
-          <button 
-            className={styles.addButton} 
-            onClick={() => setGroupModalOpen(true)}
-            aria-label="Create group"
-          >
-            <svg viewBox="0 0 24 24" fill="currentColor">
-              <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
-            </svg>
-          </button>
-        </div>
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+            <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+          </svg>
+        </button>
       </div>
       
       <div className={styles.chatList}>
