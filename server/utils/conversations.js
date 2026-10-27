@@ -6,6 +6,30 @@ export const idOf = value => String(value?._id || value);
 export const isMember = (conversation, userId) => !conversation.deletedAt &&
     conversation.participants.some(participant => idOf(participant) === idOf(userId));
 
+export const membershipOf = (conversation, userId) =>
+    conversation.memberships?.find(member => idOf(member.user) === idOf(userId));
+
+// Legacy members keep their complete history until explicit metadata is saved.
+export function visibleMessages(conversation, userId) {
+    const member = membershipOf(conversation, userId);
+    const conditions = [{ conversation: conversation._id }];
+    if (member?.joinedAt) conditions.push({ $or: [
+        { createdAt: { $gt: member.joinedAt } },
+        { createdAt: member.joinedAt, ...(member.joinedAfterMessageId ? { _id: { $gt: member.joinedAfterMessageId } } : {}) },
+    ] });
+    return { $and: conditions };
+}
+
+export function afterPosition(date, id) {
+    return { $or: [{ createdAt: { $gt: date } }, { createdAt: date, _id: { $gt: id } }] };
+}
+
+export function ensureMemberships(conversation) {
+    for (const user of conversation.participants) {
+        if (!membershipOf(conversation, user)) conversation.memberships.push({ user: idOf(user), joinedAt: new Date(0) });
+    }
+}
+
 export async function requireConversation(id, userId) {
     objectId(id, 'conversation ID');
     const conversation = await Conversation.findById(id);

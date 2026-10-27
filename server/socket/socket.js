@@ -19,6 +19,7 @@ export const InitializeSocket = (server, config = runtimeConfig()) => {
             const token = parse(socket.handshake.headers.cookie || '').token;
             const { user, expiresAt } = await authenticateToken(token);
             socket.data.userId = idOf(user);
+            socket.data.username = user.username;
             // Token stays server-side and is never sent in event payloads.
             socket.sessionToken = token;
             socket.expiresAt = expiresAt;
@@ -64,14 +65,40 @@ export const InitializeSocket = (server, config = runtimeConfig()) => {
         socket.on('leave chat', id => {
             if (typeof id === 'string') socket.leave(conversationRoom(id));
         });
+        const typing = new Map();
+        const notifyTyping = (event, id, participants) => {
+            for (const participant of participants) {
+                if (idOf(participant) === socket.data.userId) continue;
+                io.to(personalRoom(idOf(participant))).emit(event, {
+                    conversationId: id, userId: socket.data.userId, username: socket.data.username, typingId: socket.id,
+                });
+            }
+        };
+        socket.on('disconnect', () => {
+            for (const [id, state] of typing) {
+                clearTimeout(state.timer);
+                notifyTyping('stop typing', id, state.participants);
+            }
+            typing.clear();
+        });
         for (const event of ['typing', 'stop typing']) {
             handle(event, (id, conversation) => {
-                for (const participant of conversation.participants) {
-                    if (idOf(participant) === socket.data.userId) continue;
-                    io.to(personalRoom(idOf(participant))).emit(event, {
-                        conversationId: id, userId: socket.data.userId,
-                    });
+                const previous = typing.get(id);
+                clearTimeout(previous?.timer);
+                if (event === 'stop typing') {
+                    typing.delete(id);
+                    notifyTyping(event, id, conversation.participants);
+                    return;
                 }
+                const now = Date.now();
+                if (!previous || now - previous.emittedAt >= 1000) notifyTyping(event, id, conversation.participants);
+                const state = { participants: conversation.participants, emittedAt: !previous || now - previous.emittedAt >= 1000 ? now : previous.emittedAt };
+                state.timer = setTimeout(() => {
+                    typing.delete(id);
+                    notifyTyping('stop typing', id, state.participants);
+                }, 4000);
+                state.timer.unref();
+                typing.set(id, state);
             });
         }
         // There is deliberately no setup/identity or client message relay handler.
