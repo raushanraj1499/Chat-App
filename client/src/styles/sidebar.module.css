@@ -43,4 +43,12 @@
   font-size: 1rem;
   padding: 24px 0 32px 0;
   color: #b0b8c1;
-} 
+}
+
+@media (max-width: 768px) {
+  .sidebar { width: 100%; height: auto; flex-direction: row; align-items: center; flex-shrink: 0; }
+  .brand { font-size: 18px; padding: 12px; margin: 0; }
+  .navLinks { flex-direction: row; padding: 0 12px; gap: 12px; }
+  .navLinks a { font-size: 14px; }
+  .footer { display: none; }
+}

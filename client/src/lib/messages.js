@@ -1,6 +1,13 @@
 export const conversationIdOf = (message) =>
   typeof message.conversation === 'object' ? message.conversation?._id : message.conversation;
 
+export function isVisibleMessage(message, conversation) {
+  if (!conversation?.joinedAt) return true;
+  const time = new Date(message.createdAt).getTime();
+  const joined = new Date(conversation.joinedAt).getTime();
+  return time > joined || (time === joined && (!conversation.joinedAfterMessageId || message._id > conversation.joinedAfterMessageId));
+}
+
 export function mergeMessages(existing = [], incoming = []) {
   const byId = new Map(existing.map((message) => [message._id, message]));
   incoming.forEach((message) => {

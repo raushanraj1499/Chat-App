@@ -33,6 +33,9 @@ const ChatItem = ({ conversation, selectedConversation, setSelectedConversation 
 
   return (
     <div
+      role="button" tabIndex={0}
+      aria-pressed={selectedConversation?._id === conversation._id}
+      onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setSelectedConversation(conversation); } }}
       onClick={() => setSelectedConversation(conversation)}
       className={`${styles.chatItem} ${selectedConversation?._id === conversation._id ? styles.activeChatItem : ''}`}
     >

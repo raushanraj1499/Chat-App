@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { useAuth } from './AuthContext';
 import { useSocket } from './SocketContext';
-import { mergeMessages, conversationIdOf } from '../lib/messages.js';
+import { mergeMessages, conversationIdOf, isVisibleMessage } from '../lib/messages.js';
 import { mergeConversations, sortConversations } from '../lib/conversations.js';
 
 const ConversationContext = createContext();
@@ -14,15 +14,22 @@ export const ConversationProvider = ({ children }) => {
   const { socket } = useSocket();
   const versions = useRef(new Map());
   const removed = useRef(new Set());
+  const visibility = useRef(new Map());
   const captureVersions = useCallback(() => new Map(versions.current), []);
   const touch = useCallback(id => versions.current.set(id, (versions.current.get(id) || 0) + 1), []);
 
-  const addMessages = useCallback((conversationId, incoming) => {
+  const addMessages = useCallback((conversationId, incoming, recentPage = false) => {
     if (removed.current.has(conversationId)) return;
-    setMessages(previous => ({
-      ...previous,
-      [conversationId]: mergeMessages(previous[conversationId], incoming),
-    }));
+    setMessages(previous => {
+      const boundary = recentPage ? mergeMessages([], incoming)[0] : null;
+      // A reconnect may miss more than one page. Restart its contiguous window
+      // at the new page, retaining newer live messages and edits raced by HTTP.
+      const items = mergeMessages(previous[conversationId], incoming).filter(message =>
+        isVisibleMessage(message, visibility.current.get(conversationId)) && (!boundary ||
+          new Date(message.createdAt) > new Date(boundary.createdAt) ||
+          (+new Date(message.createdAt) === +new Date(boundary.createdAt) && message._id >= boundary._id)));
+      return { ...previous, [conversationId]: items };
+    });
   }, []);
 
   const removeConversation = useCallback(id => {
@@ -37,11 +44,16 @@ export const ConversationProvider = ({ children }) => {
     });
   }, [touch]);
 
-  const upsertConversation = useCallback(conversation => {
+  const upsertConversation = useCallback((conversation, restore = false) => {
     if (!conversation?._id) return;
     const id = conversation._id;
+    if (removed.current.has(id) && !restore) return;
+    const current = visibility.current.get(id);
+    if (current?.revision !== undefined && conversation.revision !== undefined && current.revision > conversation.revision) return;
     touch(id);
     removed.current.delete(id);
+    visibility.current.set(id, conversation);
+    setMessages(previous => previous[id] ? { ...previous, [id]: previous[id].filter(message => isVisibleMessage(message, conversation)) } : previous);
     setConversations(previous => mergeConversations(previous, [conversation]));
     setSelectedConversation(previous => previous?._id === id
       ? mergeConversations([previous], [conversation])[0] : previous);
@@ -58,6 +70,11 @@ export const ConversationProvider = ({ children }) => {
     for (const id of removed.current) {
       if (!changed(id) && remote.has(id)) removed.current.delete(id);
     }
+    for (const [id, conversation] of remote) {
+      const current = visibility.current.get(id);
+      if (current?.revision !== undefined && conversation.revision !== undefined && current.revision > conversation.revision) remote.set(id, current);
+      else if (!changed(id)) visibility.current.set(id, conversation);
+    }
     setConversations(previous => {
       const result = new Map(remote);
       previous.forEach(item => {
@@ -70,7 +87,8 @@ export const ConversationProvider = ({ children }) => {
       return remote.get(previous._id) || null;
     });
     setMessages(previous => Object.fromEntries(Object.entries(previous).filter(([id]) =>
-      remote.has(id) || (changed(id) && !removed.current.has(id)))));
+      remote.has(id) || (changed(id) && !removed.current.has(id))).map(([id, items]) =>
+      [id, items.filter(message => isVisibleMessage(message, visibility.current.get(id)))])));
   }, []);
 
   const applyMessage = useCallback(message => {
@@ -94,7 +112,7 @@ export const ConversationProvider = ({ children }) => {
 
   useEffect(() => {
     if (!socket) return;
-    const onConversation = ({ conversation }) => upsertConversation(conversation);
+    const onConversation = ({ conversation }) => upsertConversation(conversation, true);
     const onRemoval = ({ conversationId }) => removeConversation(conversationId);
     const events = ['new message', 'message updated', 'message deleted'];
     events.forEach(event => socket.on(event, applyMessage));

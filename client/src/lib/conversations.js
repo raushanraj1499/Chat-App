@@ -8,7 +8,9 @@ export function mergeConversations(existing, incoming) {
   const byId = new Map(existing.map(item => [item._id, item]));
   for (const item of incoming) {
     const current = byId.get(item._id);
-    if (current?.updatedAt && item.updatedAt && new Date(current.updatedAt) > new Date(item.updatedAt)) continue;
+    if (current?.revision !== undefined && item.revision !== undefined) {
+      if (current.revision > item.revision) continue;
+    } else if (current?.updatedAt && item.updatedAt && new Date(current.updatedAt) > new Date(item.updatedAt)) continue;
     byId.set(item._id, item);
   }
   return sortConversations([...byId.values()]);

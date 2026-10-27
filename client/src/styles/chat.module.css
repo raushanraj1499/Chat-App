@@ -159,7 +159,7 @@
 }
 
 .chatName:hover {
-  cursor: pointer; 
+  cursor: default;
 }
 
 .messagesArea {
@@ -179,6 +179,36 @@
   content: '';
   flex: 1;
 }
+
+.chatHeader { align-items: center; flex-wrap: wrap; gap: 12px; padding: 20px 24px; }
+.chatHeader button, .loadOlder { background: #f0f2f5; color: #1c2940; border: 1px solid #d1d5db; border-radius: 6px; padding: 8px 12px; cursor: pointer; }
+.loadOlder { align-self: center; flex-shrink: 0; margin: 12px 0; }
+.typingIndicator { min-height: 24px; padding: 0 24px; color: #555; font-size: 13px; }
+.messageSender { display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+.messageBubble p { white-space: pre-wrap; }
+.deletedMessage { font-style: italic; opacity: .75; }
+.messageActions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.messageActions button { border: 0; background: transparent; color: inherit; text-decoration: underline; cursor: pointer; font-size: 12px; padding: 4px; }
+.unreadBadge { background: #1c2940; color: white; border-radius: 16px; min-width: 24px; padding: 3px 7px; text-align: center; font-size: 12px; }
+.modalBackdrop { position: fixed; inset: 0; z-index: 1200; background: rgb(0 0 0 / 45%); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.modalCard { background: white; color: #222; border-radius: 12px; padding: 24px; width: min(100%, 520px); max-height: 90dvh; overflow-y: auto; box-shadow: 0 8px 32px #0003; box-sizing: border-box; }
+.modalHeading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.modalHeading h2 { margin: 0 0 16px; font-size: 24px; }
+.modalCard button { padding: 8px 12px; border: 1px solid #c7cdd5; border-radius: 6px; background: #f7f8fa; color: #1c2940; cursor: pointer; }
+.modalCard button:disabled { opacity: .5; cursor: default; }
+.modalCard label { display: flex; flex-direction: column; gap: 6px; font-weight: 500; }
+.modalCard input, .modalCard textarea { padding: 10px; border: 1px solid #bfc5cc; border-radius: 6px; font: inherit; width: 100%; box-sizing: border-box; }
+.modalCard textarea { min-height: 120px; resize: vertical; }
+.modalCard [role="alert"] { color: #9b2020; }
+.groupForm, .groupForm form, .userPicker { display: flex; flex-direction: column; gap: 12px; }
+.groupForm h3 { margin: 8px 0 0; }
+.memberList { list-style: none; padding: 0; margin: 0; }
+.memberList li { padding: 12px 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid #e5e7eb; overflow-wrap: anywhere; }
+.memberList li div, .selectedUsers, .pickerResults, .groupActions { display: flex; flex-wrap: wrap; gap: 8px; }
+.pickerResults { max-height: 180px; overflow-y: auto; }
+.confirmation { padding: 12px; background: #fff2f0; border-radius: 6px; }
+.confirmation button { margin-right: 8px; }
+button:focus-visible, [role="button"]:focus-visible { outline: 2px solid #2584e6; outline-offset: 3px; }
 
 /* .messagesArea::-webkit-scrollbar {
   width: 20px !important;
@@ -539,6 +569,7 @@
 
 .mainContent {
   flex: 1;
+  min-width: 0;
   background: #fafbfc;
   display: flex;
   flex-direction: column;
@@ -828,4 +859,17 @@
   .noChatContent p {
     font-size: 0.9rem;
   }
+  .appContainer { flex-direction: column; height: 100dvh; min-height: 100dvh; }
+  .header { padding: 12px; gap: 12px; flex-wrap: wrap; }
+  .headerLeft { gap: 12px; }
+  .headerRight { gap: 8px; }
+  .main { overflow-y: auto; }
+  .chatSection { min-height: 55dvh; flex: 1 0 55dvh; }
+  .rightPanel { width: 100%; min-width: 0; max-height: 30dvh; flex-shrink: 0; }
+  .messagesArea { padding: 0 12px; }
+  .messageContent { max-width: 95%; gap: 6px; }
+  .messageInputArea { padding: 12px; gap: 8px; }
+  .messageInput { min-width: 0; padding: 12px; }
+  .chatName { font-size: 24px; overflow-wrap: anywhere; }
+  .modalCard { padding: 16px; }
 }

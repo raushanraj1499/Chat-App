@@ -13,6 +13,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { useConversation } from "../context/ConversationContext.jsx";
 import { useSocket } from "../context/SocketContext.jsx";
 import GroupMembersListModal from "../modals/GroupMembersListModal.jsx";
+import useTyping from '../hooks/useTyping.js';
 
 const Chat = () => {
   const { user } = useAuth();
@@ -20,6 +21,9 @@ const Chat = () => {
   const { selectedConversation, setSelectedConversation, conversations,
     messages, addMessages, captureVersions, reconcileConversations, removeConversation, upsertConversation, applyMessage } = useConversation();
   const conversationId = selectedConversation?._id;
+  const joinedAt = selectedConversation?.joinedAt;
+  const joinedAfter = selectedConversation?.joinedAfterMessageId;
+  const { compose, stopTyping, typingText } = useTyping(socket, selectedConversation);
   const [drafts, setDrafts] = useState({});
   const [pendingSends, setPendingSends] = useState({});
   const sendLocks = useRef(new Set());
@@ -35,6 +39,9 @@ const Chat = () => {
   const [historyState, setHistoryState] = useState({});
   const [conversationRetry, setConversationRetry] = useState(0);
   const [historyRetry, setHistoryRetry] = useState(0);
+  const olderRequests = useRef(new Map());
+
+  useEffect(() => { setShowGroupMembers(false); }, [conversationId]);
 
   useEffect(() => {
     mounted.current = true;
@@ -61,11 +68,13 @@ const Chat = () => {
   useEffect(() => {
     if (!conversationId) return;
     const controller = new AbortController();
-    setHistoryState(previous => ({ ...previous, [conversationId]: { loading: true, error: null } }));
+    const visibilityKey = `${joinedAt || ''}:${joinedAfter || ''}`;
+    setHistoryState(previous => ({ ...previous, [conversationId]: { ...previous[conversationId], loading: true, error: null } }));
     api.get('/api/message/' + conversationId, { signal: controller.signal }).then(({ data }) => {
       if (controller.signal.aborted) return;
-      addMessages(conversationId, data.messages);
-      setHistoryState(previous => ({ ...previous, [conversationId]: { loading: false, error: null } }));
+      addMessages(conversationId, data.messages, true);
+      setHistoryState(previous => ({ ...previous, [conversationId]: { loading: false, error: null, visibilityKey,
+        nextCursor: data.nextCursor } }));
     }).catch(error => {
       if (!controller.signal.aborted && !isCanceled(error)) {
         if ([403, 404].includes(error.response?.status)) removeConversation(conversationId);
@@ -75,7 +84,31 @@ const Chat = () => {
       }
     });
     return () => controller.abort();
-  }, [conversationId, historyRetry, connectionVersion, addMessages, removeConversation]);
+  }, [conversationId, joinedAt, joinedAfter, historyRetry, connectionVersion, addMessages, removeConversation]);
+
+  useEffect(() => {
+    const requests = olderRequests.current;
+    return () => { requests.forEach(controller => controller.abort()); requests.clear(); };
+  }, [conversationId, joinedAt, joinedAfter]);
+
+  const loadOlder = async () => {
+    const cursor = historyState[conversationId]?.nextCursor;
+    if (!cursor || olderRequests.current.has(conversationId)) return;
+    const controller = new AbortController();
+    olderRequests.current.set(conversationId, controller);
+    setHistoryState(previous => ({ ...previous, [conversationId]: { ...previous[conversationId], olderLoading: true, olderError: null } }));
+    try {
+      const { data } = await api.get(`/api/message/${conversationId}`, { params: { before: cursor, limit: 50 }, signal: controller.signal });
+      if (controller.signal.aborted) return;
+      addMessages(conversationId, data.messages);
+      setHistoryState(previous => ({ ...previous, [conversationId]: { ...previous[conversationId], nextCursor: data.nextCursor, olderLoading: false } }));
+    } catch (error) {
+      if (!controller.signal.aborted && !isCanceled(error)) {
+        if ([403, 404].includes(error.response?.status)) removeConversation(conversationId);
+        setHistoryState(previous => ({ ...previous, [conversationId]: { ...previous[conversationId], olderLoading: false, olderError: errorMessage(error, 'Unable to load older messages.') } }));
+      }
+    } finally { if (olderRequests.current.get(conversationId) === controller) olderRequests.current.delete(conversationId); }
+  };
 
   // Joining a room is independent of HTTP history and repeats after reconnect.
   useEffect(() => {
@@ -115,7 +148,7 @@ const Chat = () => {
     if (!content.trim() || !conversationId || sendLocks.current.has(conversationId)) return;
     sendLocks.current.add(conversationId);
     setPendingSends(previous => ({ ...previous, [conversationId]: true }));
-    if (socket?.connected) socket.emit("stop typing", conversationId);
+    stopTyping();
     try {
       const { data } = await api.post('/api/message/' + conversationId, { content });
       if (!mounted.current) return;
@@ -161,12 +194,15 @@ const Chat = () => {
                     <button onClick={() => setHistoryRetry(previous => previous + 1)}>Retry messages</button>
                   </div>
                 )}
-                <MessageList messages={messages[conversationId] || []}
-                  selectedConversation={selectedConversation} setShowGroupMembers={setShowGroupMembers} />
+                <MessageList key={`${conversationId}:${joinedAt || ''}:${joinedAfter || ''}`} messages={messages[conversationId] || []}
+                  selectedConversation={selectedConversation} setShowGroupMembers={setShowGroupMembers}
+                  historyState={currentHistory} loadOlder={loadOlder} />
+                <div className={styles.typingIndicator} role="status" aria-live="polite">{typingText}</div>
                 <form onSubmit={handleSendMessage} className={styles.messageInputArea}>
                   <input type="text" placeholder="Write your message" aria-label="Message"
                     value={drafts[conversationId] || ''}
-                    onChange={(event) => setDrafts(previous => ({ ...previous, [conversationId]: event.target.value }))}
+                    onChange={(event) => { const value = event.target.value; setDrafts(previous => ({ ...previous, [conversationId]: value })); compose(value); }}
+                    onBlur={stopTyping}
                     className={styles.messageInput} />
                   <button type="submit" className={styles.sendButton}
                     disabled={pendingSends[conversationId] || !drafts[conversationId]?.trim()}
