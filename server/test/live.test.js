@@ -97,7 +97,7 @@ test('automatic personal rooms ignore supplied identity and reject unauthorized 
     const bob = await connect(tokens[1]);
     const typing = event(bob, 'typing');
     await ack(alice, 'typing', String(conversation._id));
-    assert.deepEqual(await typing, { conversationId: String(conversation._id), userId: String(users[0]._id) });
+    assert.deepEqual(await typing, { conversationId: String(conversation._id), userId: String(users[0]._id), username: 'Alice', typingId: alice.id });
 });
 
 test('HTTP writes publish creation, edits and deletion to unopened conversations and every tab', async () => {
@@ -272,4 +272,107 @@ test('configured frontend origin is accepted and untrusted socket origins are re
     await rejected;
     assert.equal(forbidden.connected, false);
     forbidden.disconnect();
+});
+
+test('new joins and rejoins hide earlier history, previews, unread counts, mutations and live edits', async () => {
+    const conversation = await group([users[0]._id, users[1]._id]);
+    const id = String(conversation._id);
+    const old = (await request(`/message/${id}`, tokens[0], 'POST', { content: 'Before joining' })).body.data;
+    const carol = await connect(tokens[2]);
+    const added = event(carol, 'conversation updated');
+    await request(`/conversation/${id}`, tokens[1], 'PUT', { operation: 'addMembers', data: { participants: [String(users[2]._id)] } });
+    const summary = (await added).conversation;
+    assert.equal(summary.latestMessage, null);
+    assert.equal(summary.unreadCount, 0);
+    assert.equal((await request(`/message/${id}`, tokens[2])).body.messages.length, 0);
+    assert.equal((await request(`/message/${id}?before=${old._id}`, tokens[2])).status, 400);
+    assert.equal((await request(`/message/${id}/${old._id}`, tokens[2], 'PATCH', { content: 'Hidden' })).status, 404);
+    assert.equal((await request(`/conversation/${id}/read`, tokens[2], 'POST', { messageId: old._id })).status, 404);
+    const edits = [];
+    carol.on('message updated', payload => edits.push(payload));
+    await request(`/message/${id}/${old._id}`, tokens[0], 'PATCH', { content: 'Still private' });
+    await ack(carol, 'join chat', id);
+    assert.equal(edits.length, 0);
+    const visible = (await request(`/message/${id}`, tokens[2], 'POST', { content: 'During first membership' })).body.data;
+    await request(`/conversation/${id}`, tokens[2], 'PUT', { operation: 'leave' });
+    assert.equal((await request(`/message/${id}/${visible._id}`, tokens[2], 'DELETE')).status, 403);
+    await request(`/conversation/${id}`, tokens[1], 'PUT', { operation: 'addMembers', data: { participants: [String(users[2]._id)] } });
+    assert.equal((await request(`/message/${id}`, tokens[2])).body.messages.length, 0);
+    assert.equal((await request(`/message/${id}/${visible._id}`, tokens[2], 'DELETE')).status, 404);
+    const newEvent = event(carol, 'new message');
+    await request(`/message/${id}`, tokens[0], 'POST', { content: 'After rejoining' });
+    assert.equal((await newEvent).conversationSummary.unreadCount, 1);
+    assert.deepEqual((await request(`/message/${id}`, tokens[2])).body.messages.map(item => item.content), ['After rejoining']);
+});
+
+test('read positions persist, are monotonic, sync every tab and leave concurrent messages unread', async () => {
+    const conversation = await group();
+    const id = String(conversation._id);
+    const bob = await connect(tokens[1]);
+    const otherTab = await connect(tokens[1]);
+    const first = (await request(`/message/${id}`, tokens[0], 'POST', { content: 'First' })).body.data;
+    const second = (await request(`/message/${id}`, tokens[0], 'POST', { content: 'Arrived concurrently' })).body.data;
+    assert.equal((await request('/conversation', tokens[1])).body.conversations[0].unreadCount, 2);
+    const updates = [bob, otherTab].map(socket => event(socket, 'conversation updated'));
+    const activity = (await Conversation.findById(id)).updatedAt;
+    const read = await request(`/conversation/${id}/read`, tokens[1], 'POST', { messageId: first._id });
+    assert.equal(read.body.conversation.unreadCount, 1);
+    for (const update of await Promise.all(updates)) assert.equal(update.conversation.unreadCount, 1);
+    assert.equal(+(await Conversation.findById(id)).updatedAt, +activity);
+    await request(`/conversation/${id}/read`, tokens[1], 'POST', { messageId: second._id });
+    await request(`/conversation/${id}/read`, tokens[1], 'POST', { messageId: first._id });
+    assert.equal((await request('/conversation', tokens[1])).body.conversations[0].unreadCount, 0);
+    await request(`/message/${id}`, tokens[1], 'POST', { content: 'My own message' });
+    const deleted = (await request(`/message/${id}`, tokens[0], 'POST', { content: 'Unread then deleted' })).body.data;
+    await request(`/message/${id}/${deleted._id}`, tokens[0], 'DELETE');
+    assert.equal((await request('/conversation', tokens[1])).body.conversations[0].unreadCount, 0);
+    const foreign = await group();
+    const foreignMessage = (await request(`/message/${foreign._id}`, tokens[0], 'POST', { content: 'Other chat' })).body.data;
+    assert.equal((await request(`/conversation/${id}/read`, tokens[1], 'POST', { messageId: foreignMessage._id })).status, 404);
+});
+
+test('history pages are bounded, stable on equal timestamps and retain deletion markers', async () => {
+    const conversation = await group();
+    const id = String(conversation._id);
+    const time = new Date('2026-01-01T00:00:00Z');
+    const records = await Message.insertMany(Array.from({ length: 123 }, (_, index) => ({
+        conversation: id, sender: users[0]._id, content: `Message ${index}`, createdAt: time, updatedAt: time,
+    })));
+    await request(`/message/${id}/${records[70]._id}`, tokens[0], 'DELETE');
+    const pages = [];
+    let cursor;
+    do {
+        const response = await request(`/message/${id}${cursor ? `?before=${cursor}&limit=50` : ''}`, tokens[1]);
+        assert.equal(response.status, 200);
+        assert.ok(response.body.messages.length <= 50);
+        pages.push(response.body.messages);
+        cursor = response.body.nextCursor;
+    } while (cursor);
+    assert.deepEqual(pages.map(page => page.length), [50, 50, 23]);
+    const messages = pages.flat();
+    assert.equal(new Set(messages.map(message => message._id)).size, 123);
+    assert.equal(messages.find(message => message._id === String(records[70]._id)).content, '');
+    for (const limit of ['0', '51', 'nope', '1.5']) assert.equal((await request(`/message/${id}?limit=${limit}`, tokens[1])).status, 400);
+    assert.equal((await request(`/message/${id}?before=invalid`, tokens[1])).status, 400);
+    assert.equal((await request(`/message/${id}/${records[0]._id}`, tokens[1], 'PATCH', { content: 'Not mine' })).status, 403);
+    const edited = await request(`/message/${id}/${records[0]._id}`, tokens[0], 'PATCH', { content: 'Updated' });
+    assert.equal(edited.body.data.isEdited, true);
+    assert.equal(edited.body.data.createdAt, time.toISOString());
+});
+
+test('groups permit duplicate membership sets and enforce administrator-only operations including sole admin deletion', async () => {
+    assert.equal((await request('/conversation/group', tokens[0], 'POST', { conversationName: 'Invalid', participants: [String(users[0]._id)] })).status, 400);
+    const create = () => request('/conversation/group', tokens[0], 'POST', { conversationName: 'Same team', participants: [String(users[1]._id)] });
+    const one = await create(), two = await create();
+    assert.equal(one.status, 201); assert.equal(two.status, 201);
+    assert.notEqual(one.body.conversation._id, two.body.conversation._id);
+    const id = one.body.conversation._id;
+    for (const operation of ['removeMember', 'transferAdmin']) assert.equal((await request(`/conversation/${id}`, tokens[1], 'PUT', { operation, data: { userId: String(users[0]._id) } })).status, 403);
+    await request(`/conversation/${id}`, tokens[1], 'PUT', { operation: 'leave' });
+    assert.equal((await request(`/conversation/${id}`, tokens[0], 'PUT', { operation: 'leave' })).status, 400);
+    assert.equal((await request(`/conversation/${id}`, tokens[0], 'DELETE')).status, 200);
+    for (const [path, method, body] of [
+        [`/message/${id}`, 'GET'], [`/message/${id}`, 'POST', { content: 'Blocked' }],
+        [`/conversation/${id}`, 'PUT', { operation: 'rename', data: { conversationName: 'Blocked' } }],
+    ]) assert.equal((await request(path, tokens[0], method, body)).status, 404);
 });
