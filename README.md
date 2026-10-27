@@ -113,10 +113,50 @@ Backend mutation interfaces used by this event flow:
 | `DELETE /api/message/:conversationId/:messageId` | No body; current member and sender only |
 
 Deleted messages retain an empty-content tombstone and timestamp. Deleted groups
-are excluded from lists and reject history and mutations. These paths support
-point 2's server events and revocation; the complete group/message action UI,
-join-time visibility, pagination, unread tracking, and migration remain work for
-the later plan points. Existing records work without a migration for this step.
+are excluded from lists and reject history and mutations.
+
+## Group and message behavior (plan point 3)
+
+Open a group and choose **Manage group** to rename it, select new members, or leave.
+Every current member can rename/add users. Admins can remove others, transfer
+administration, or delete the group for everyone. Removal, transfer, leave, and
+deletion require confirmation. An admin must transfer administration before
+leaving; a sole admin can delete the group. Separate groups may have the same
+members. Direct conversations remain available.
+
+Membership metadata records each user's latest join time and read position.
+New and rejoining members see only messages from their latest join onward, including
+previews, pagination, unread counts, and live edits/deletions. Existing members
+without metadata keep their full history; metadata is initialized when needed.
+Existing messages count as unread until a read position is recorded. The broader
+data migration described in plan point 4 remains a separate step; this change
+does not run a migration against the configured database.
+
+Senders can edit or delete their visible messages while they remain members.
+Edits show **Edited**; deletion clears the stored text and leaves **Message deleted**
+with its sender and original timestamp. Changes update participants and other tabs.
+History loads 50 messages at a time. **Load older messages** retains scroll position;
+incoming messages scroll into view only when already near the bottom.
+
+Typing indicators show member names, throttle composing events, and stop on send,
+blur, conversation changes, inactivity, or disconnect. Stale indicators expire.
+Unread counts exclude deleted messages and a member's own messages. Reads advance
+only in a visible, focused tab at the bottom of its conversation, using the last
+displayed message ID. Server-published summaries synchronize counts across tabs
+and refreshes. Conversation revisions prevent stale responses undoing newer state.
+
+Additional API details:
+
+| Method and route | Behavior |
+| --- | --- |
+| `GET /api/message/:conversationId?before=<messageId>&limit=50` | Visible messages in chronological order; `{ messages, nextCursor }`. Maximum page size 50; `nextCursor` is null at the beginning of history. |
+| `POST /api/conversation/:id/read` | `{ messageId }`; monotonically advances the authenticated member's read position and returns `{ conversation }`. |
+
+Point 3 regression tests cover joins/rejoins and hidden-message events, ownership,
+admin permissions, unread persistence across tabs, concurrent incoming messages,
+pagination with equal timestamps, group controls, message actions, scroll retention,
+typing expiry, and focused/visible read updates. Run the existing server and client
+test commands in **Verification** above. These tests use isolated data or mocks.
 
 ### Configuration and production
 
