@@ -126,6 +126,30 @@ const register = asyncHandler(async(req, res)=>{
     })
 })
 
+const updateAvatar = asyncHandler(async(req, res) => {
+    if (!req.file?.buffer) {
+        return res.status(400).json({ success: false, message: 'Please choose an image to upload' });
+    }
+
+    const imageOnCloudinary = await uploadAvatar(req.file.buffer);
+    const user = await User.findByIdAndUpdate(
+        req.user._id,
+        { avatar: imageOnCloudinary.secure_url },
+        { new: true, runValidators: true }
+    );
+
+    return res.status(200).json({
+        success: true,
+        message: 'Avatar updated successfully',
+        user: {
+            _id: user._id,
+            username: user.username,
+            email: user.email,
+            avatar: user.avatar,
+        },
+    });
+});
+
 const searchUser = asyncHandler(async(req,res)=>{
     const username = textValue(req.query.q, 'q', 100);
     const escapedUsername = username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -153,5 +177,6 @@ export {
     logout,
     register,
     searchUser,
-    getUserInfo
+    getUserInfo,
+    updateAvatar
 }
