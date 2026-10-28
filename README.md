@@ -70,14 +70,6 @@ npm install
 npm run dev
 ```
 
-## Verification
-
-Run `npm run lint`, `npm test`, and `npm run build` from `client/`.
-Run `npm test` from `server/` for authentication, startup, rate-limit, and isolated
-MongoDB HTTP/socket integration checks.
-The frontend regression tests use mocked HTTP and socket connections; they do not
-require MongoDB or Cloudinary.
-
 Signed-out users are redirected to `/login`; signed-in users are redirected from
 `/login` and `/signup` to `/chat`. `/` resolves according to the current session.
 An unavailable server shows a retry action. Live updates reconnect automatically,
@@ -152,12 +144,6 @@ Additional API details:
 | `GET /api/message/:conversationId?before=<messageId>&limit=50` | Visible messages in chronological order; `{ messages, nextCursor }`. Maximum page size 50; `nextCursor` is null at the beginning of history. |
 | `POST /api/conversation/:id/read` | `{ messageId }`; monotonically advances the authenticated member's read position and returns `{ conversation }`. |
 
-Point 3 regression tests cover joins/rejoins and hidden-message events, ownership,
-admin permissions, unread persistence across tabs, concurrent incoming messages,
-pagination with equal timestamps, group controls, message actions, scroll retention,
-typing expiry, and focused/visible read updates. Run the existing server and client
-test commands in **Verification** above. These tests use isolated data or mocks.
-
 ### Configuration and production
 
 Use Node.js 22.9 or newer. Copy `server/.env.example` to `server/.env` and fill in
@@ -190,17 +176,3 @@ Retry-After header when exceeded.
 Deploy one Node process: the socket adapter, per-conversation operation locks,
 and authentication rate limits are process-local. Multiple replicas require a
 shared socket adapter, distributed serialization, and shared rate-limit storage.
-
-### Verification for point 2
-
-Run `npm test` in `server/` for authentication, configuration/startup, rate-limit,
-and HTTP/socket integration tests. Integration tests start a fresh temporary
-MongoDB with `mongodb-memory-server`; they never connect to the configured app
-database. The first dependency install/test may download a MongoDB test binary.
-The tests cover unauthorized rooms/typing, unopened chats, multiple tabs,
-server-published edits/deletions, membership revocation, failed writes, missed
-updates, logout, and socket expiry.
-
-Run `npm test`, `npm run lint`, and `npm run build` in `client/`. React tests also
-cover reconnect refetches, missed membership changes, and stale history/summaries
-racing live edits and removals.
